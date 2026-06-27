@@ -1,0 +1,52 @@
+
+<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>ASOC AI ME Dashboard</title><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><link rel="stylesheet" href="/static/style.css"/></head>
+<body><header class="topbar"><div><div class="eyebrow">Vodacom ASOC · AI Portfolio</div><h1>{{ settings.dashboard_title }}</h1><p>AI benefits tracking, target-based KPI realisation and autonomous network maturity view</p></div><div class="nav">{% if user.role in ['admin','super_admin'] %}<a href="/admin">Admin / Input Data</a>{% endif %}<a id="exportPpt" href="/export/pptx?theme=dark">Export PowerPoint</a><a href="/export/csv">Export CSV</a><button type="button" id="themeToggle" class="theme-toggle">Light mode</button><span class="badge">{{ settings.active_year }}</span><span class="badge">{{ user.display_name or user.username }}</span><a href="/logout">Logout</a></div></header>
+<main>
+<section class="scorecards">
+<div class="card kpi"><span>Active AI use cases</span><strong>{{ summary.active_use_cases }}</strong><small>FM · PM · CM · OSS</small></div>
+<div class="card kpi"><span>Annual value</span><strong>R{{ "{:,.1f}".format(summary.annual_value / 1000000) }}m</strong><small>Target R{{ "{:,.1f}".format(gauges.annual_benefits.target / 1000000) }}m</small></div>
+<div class="card kpi"><span>Hours saved</span><strong>{{ "{:,}".format(summary.hours_saved) }}</strong><small>Target {{ "{:,}".format(gauges.hours_saved.target) }}</small></div>
+<div class="card kpi"><span>Production use cases</span><strong>{{ summary.production }}</strong><small>Target {{ gauges.production_use_cases.target }}</small></div>
+<div class="card kpi"><span>Reusable use cases</span><strong>{{ summary.reusable_percent }}%</strong><small>{{ summary.reusable_count }} of {{ summary.active_use_cases }} score ≥ 4</small></div>
+<div class="card kpi"><span>Portfolio ROI</span><strong>{{ summary.portfolio_roi }}%</strong><small>Target {{ gauges.roi.target }}%</small></div>
+</section>
+
+<section class="panel"><div class="panel-head"><h2>Executive meter gauges</h2><span>current vs {{ gauges.year }} target</span></div><div class="gauges">
+{% for key,g in gauges.items() if key != 'year' %}
+<div class="gauge-card">
+  <div class="gauge" style="--pct: {{ g.pct / 2 }}%">
+    <span>{{ g.pct }}%</span>
+  </div>
+  <strong>{{ g.label }}</strong>
+  <div class="gauge-values">
+    <div>
+      <small>Current</small>
+      <b>{% if key == 'annual_benefits' %}R{{ "{:,.1f}".format(g.current/1000000) }}m{% elif key == 'hours_saved' %}{{ "{:,}".format(g.current) }}{% elif key == 'tmf_maturity' %}L{{ g.current }}{% elif key in ['reusable_percent','roi'] %}{{ g.current }}%{% else %}{{ g.current }}{% endif %}</b>
+    </div>
+    <div>
+      <small>Target</small>
+      <b>{% if key == 'annual_benefits' %}R{{ "{:,.1f}".format(g.target/1000000) }}m{% elif key == 'hours_saved' %}{{ "{:,}".format(g.target) }}{% elif key == 'tmf_maturity' %}L{{ g.target }}{% elif key in ['reusable_percent','roi'] %}{{ "{:,.0f}".format(g.target) }}%{% else %}{{ "{:,.0f}".format(g.target) }}{% endif %}</b>
+    </div>
+  </div>
+  <div class="progress-line"><i style="width: {{ g.pct }}%"></i></div>
+</div>
+{% endfor %}
+</div></section>
+
+<section class="grid two"><div class="panel"><div class="panel-head"><h2>Portfolio value by domain</h2><span>R value</span></div><canvas id="valueByDomain"></canvas></div><div class="panel"><div class="panel-head"><h2>Hours saved by domain</h2><span>capacity returned</span></div><canvas id="hoursByDomain"></canvas></div></section>
+<section class="grid two"><div class="panel"><div class="panel-head"><h2>Sponsor value view</h2><span>executive accountability</span></div><canvas id="valueBySponsor"></canvas></div><div class="panel"><div class="panel-head"><h2>Portfolio delivery mix</h2><span>by status</span></div><canvas id="statusMix"></canvas></div></section>
+<section class="panel"><div class="panel-head"><h2>Strategic big bets</h2><span>highest value / autonomy leverage</span></div><div class="bigbets">{% for bet in settings.big_bets %}<div><strong>{{ bet.name }}</strong><p>{{ bet.description }}</p></div>{% endfor %}</div></section>
+<section class="panel"><div class="panel-head"><h2>AI portfolio heatmap</h2><span>use case KPI and benefit tracking</span></div><div class="filters"><input id="search" placeholder="Search use cases, sponsor, owner, KPI..." /><select id="domainFilter"><option value="">All domains</option><option>Fault Management</option><option>Performance Management</option><option>Configuration Management</option><option>OSS</option></select><select id="statusFilter"><option value="">All statuses</option><option>Production</option><option>Prototype</option><option>Sandbox</option><option>In Progress</option><option>Planned</option></select></div><div class="table-wrap"><table id="caseTable"><thead><tr><th>ID</th><th>Use case</th><th>Strategic outcome</th><th>Domain</th><th>TMF</th><th>Impact</th><th>Status</th><th>KPI</th><th>Annual value</th><th>Reuse</th><th>Sponsor</th></tr></thead><tbody>{% for c in use_cases %}<tr data-domain="{{ c.domain }}" data-status="{{ c.status }}"><td>{{ c.id }}</td><td><strong>{{ c.name }}</strong><br/><small>{{ c.description }}</small></td><td>{{ c.strategic_outcome }}</td><td>{{ c.domain }}</td><td><span class="pill">{{ c.tmf_level }}</span></td><td><span class="impact {{ c.impact|replace(' ', '-')|lower }}">{{ c.impact }}</span></td><td><span class="status {{ c.status|replace(' ', '-')|lower }}">{{ c.status }}</span></td><td>{{ c.kpi }}</td><td>R{{ "{:,.0f}".format(c.annual_value) }}</td><td>{{ c.reuse_score }}</td><td>{{ c.sponsor }}</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="grid two"><div class="panel"><div class="panel-head"><h2>Autonomous network journey</h2><span>TM Forum aligned</span></div><div class="maturity"><div><b>L1</b><span>Assist</span><small>Ask ASOC, CoreXplore</small></div><div><b>L2</b><span>Augment</span><small>Ask Katlego, SOC Assistant</small></div><div><b>L3</b><span>Automate</span><small>Fault Localisation, Config Verification</small></div><div><b>L4</b><span>Closed Loop</span><small>Self-healing RAN, Agentic API</small></div><div><b>L5</b><span>Autonomous</span><small>Digital Twin, zero touch</small></div></div></div><div class="panel"><div class="panel-head"><h2>Executive decisions required</h2><span>leadership actions</span></div><ol class="decisions">{% for d in settings.executive_decisions %}<li>{{ d }}</li>{% endfor %}</ol></div></section>
+</main>
+<script>
+const rand=v=>'R'+Intl.NumberFormat('en-ZA',{notation:'compact'}).format(v);const num=v=>Intl.NumberFormat('en-ZA').format(v);
+const root=document.body,themeBtn=document.getElementById('themeToggle'),exportPpt=document.getElementById('exportPpt');
+function setTheme(theme){root.dataset.theme=theme;localStorage.setItem('asocTheme',theme);if(themeBtn)themeBtn.textContent=theme==='dark'?'Light mode':'Dark mode';if(exportPpt)exportPpt.href='/export/pptx?theme='+encodeURIComponent(theme);}
+setTheme(localStorage.getItem('asocTheme')||'dark');
+if(themeBtn)themeBtn.addEventListener('click',()=>{setTheme(root.dataset.theme==='dark'?'light':'dark');location.reload();});
+function cssVar(name){return getComputedStyle(document.body).getPropertyValue(name).trim();}
+function chart(canvasId,type,labels,values,label,formatter){const ctx=document.getElementById(canvasId);const text=cssVar('--text')||'#f4f4f5',line=cssVar('--line')||'rgba(255,255,255,.08)';return new Chart(ctx,{type,data:{labels,datasets:[{label,data:values,borderWidth:1,borderRadius:8}]},options:{responsive:true,plugins:{legend:{display:type==='doughnut',labels:{color:text}},tooltip:{callbacks:{label:c=>`${c.label}: ${formatter?formatter(c.parsed.y??c.parsed):c.parsed.y}`}}},scales:type==='doughnut'?{}:{y:{ticks:{callback:formatter||((v)=>v),color:text},grid:{color:line}},x:{ticks:{color:text},grid:{display:false}}}}});}
+fetch('/api/summary').then(r=>r.json()).then(data=>{chart('valueByDomain','bar',data.value_by_domain.map(x=>x.label),data.value_by_domain.map(x=>x.value),'Annual value',rand);chart('hoursByDomain','bar',data.hours_by_domain.map(x=>x.label),data.hours_by_domain.map(x=>x.value),'Hours saved',num);chart('valueBySponsor','bar',data.value_by_sponsor.map(x=>x.label),data.value_by_sponsor.map(x=>x.value),'Annual value',rand);chart('statusMix','doughnut',data.status_mix.map(x=>x.label),data.status_mix.map(x=>x.value),'Status value',rand);});
+const search=document.getElementById('search'),domainFilter=document.getElementById('domainFilter'),statusFilter=document.getElementById('statusFilter');function applyFilters(){const q=search.value.toLowerCase(),d=domainFilter.value,s=statusFilter.value;document.querySelectorAll('#caseTable tbody tr').forEach(row=>{const text=row.innerText.toLowerCase();row.style.display=(!q||text.includes(q))&&(!d||row.dataset.domain===d)&&(!s||row.dataset.status===s)?'':'none';});}[search,domainFilter,statusFilter].forEach(el=>el.addEventListener('input',applyFilters));
+</script></body></html>

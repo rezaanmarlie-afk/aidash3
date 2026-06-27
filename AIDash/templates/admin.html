@@ -1,0 +1,89 @@
+
+<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>Admin · ASOC AI ME Dashboard</title><link rel="stylesheet" href="/static/style.css"/></head>
+<body><header class="topbar"><div><div class="eyebrow">Vodacom ASOC · Data Maintenance</div><h1>Admin / Input Data</h1><p>Maintain use cases, targets, KPI values, reuse score legend and executive decisions.</p></div><div class="nav"><a href="/">Dashboard</a>{% if user.role == 'super_admin' %}<a href="/admin/users">Users</a>{% endif %}<a id="exportPpt" href="/export/pptx?theme=dark">Export PowerPoint</a><a href="/export/csv">Export CSV</a><button type="button" id="themeToggle" class="theme-toggle">Light mode</button><a href="/export/json">Export JSON</a><a href="/logout">Logout</a><span class="badge">{{ user.role }}</span></div></header>
+<main>{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+{% if user.role == 'super_admin' %}<section class="panel"><div class="panel-head"><h2>Portfolio targets</h2><span>gauge configuration</span></div>
+<form method="post" action="/admin/save-settings">
+<div class="form-grid">
+<div><label>Dashboard title</label><input name="dashboard_title" value="{{ settings.dashboard_title }}"/></div>
+<div><label>Portfolio period</label><input name="portfolio_period" value="{{ settings.portfolio_period }}"/></div>
+<div><label>Active target year</label><select name="active_year"><option>{{ settings.active_year }}</option><option>FY27</option><option>FY28</option><option>FY29</option></select></div>
+<div><label>TMF current maturity</label><input type="number" step="0.1" name="tmf_current" value="{{ settings.tmf_current }}"/></div>
+<div><label>TMF strategic target</label><input type="number" step="0.1" name="tmf_target" value="{{ settings.tmf_target }}"/></div>
+</div>
+<div class="table-wrap target-table"><table><thead><tr><th>Metric</th><th>FY27</th><th>FY28</th><th>FY29</th></tr></thead><tbody>
+{% set metrics = [
+('annual_benefits','Annual Benefits (R)'),
+('hours_saved','Hours Saved'),
+('production_use_cases','Production Use Cases'),
+('tmf_maturity','TMF Maturity'),
+('reusable_use_cases_percent','Reusable Use Cases (%)'),
+('portfolio_roi_percent','Portfolio ROI (%)')
+] %}
+{% for key,label in metrics %}
+<tr><td>{{ label }}</td>{% for year in ['FY27','FY28','FY29'] %}<td><input type="number" step="0.1" name="{{ year }}_{{ key }}" value="{{ settings.targets[year][key] }}"/></td>{% endfor %}</tr>
+{% endfor %}
+</tbody></table></div>
+<div class="form-grid">
+<div class="wide"><label>Executive decisions, one per line</label><textarea name="executive_decisions" rows="5">{{ settings.executive_decisions|join('\n') }}</textarea></div>
+<div class="wide"><label>Big bets, one per line. Use: Name | Description</label><textarea name="big_bets" rows="5">{% for b in settings.big_bets %}{{ b.name }} | {{ b.description }}
+{% endfor %}</textarea></div>
+<div class="wide"><button type="submit">Save targets and settings</button></div>
+</div>
+</form></section>{% endif %}
+
+<section class="panel"><div class="panel-head"><h2>Reuse score legend</h2><span>reference for use case scoring</span></div><div class="legend-grid">
+{% for r in reuse_legend %}<div class="legend-item"><b>{{ r.score }} · {{ r.level }}</b><p>{{ r.meaning }}</p></div>{% endfor %}
+</div><p class="help">Use score 4 or 5 for the executive reusable-use-cases gauge. This better supports the Build Once, Deploy Many story.</p></section>
+
+<section class="panel"><div class="panel-head"><h2>{% if record %}Edit use case: {{ record.id }}{% else %}Add / update use case{% endif %}</h2><span>dashboard input</span></div>
+<form method="post" action="/admin/save-use-case" class="form-grid">
+{% set c = record if record else {} %}
+<div><label>ID</label><input name="id" required value="{{ c.get('id','') }}"/></div>
+<div><label>Use case name</label><input name="name" required value="{{ c.get('name','') }}"/></div>
+<div><label>Domain</label><select name="domain"><option>{{ c.get('domain','Fault Management') }}</option><option>Fault Management</option><option>Performance Management</option><option>Configuration Management</option><option>OSS</option></select></div>
+<div class="wide"><label>Description</label><textarea name="description" rows="3">{{ c.get('description','') }}</textarea></div>
+<div class="wide"><label>Strategic outcome</label><textarea name="strategic_outcome" rows="2">{{ c.get('strategic_outcome','') }}</textarea></div>
+<div><label>Benefit type</label><input name="benefit_type" value="{{ c.get('benefit_type','') }}"/></div>
+<div><label>KPI</label><input name="kpi" value="{{ c.get('kpi','') }}"/></div>
+<div><label>Baseline KPI</label><input name="baseline_kpi" value="{{ c.get('baseline_kpi','') }}"/></div>
+<div><label>Current KPI</label><input name="current_kpi" value="{{ c.get('current_kpi','') }}"/></div>
+<div><label>Target KPI</label><input name="target_kpi" value="{{ c.get('target_kpi','') }}"/></div>
+<div><label>Benefit confidence</label><select name="benefit_confidence"><option>{{ c.get('benefit_confidence','Directional') }}</option><option>Higher</option><option>Medium</option><option>Directional</option></select></div>
+<div><label>Market</label><input name="market" value="{{ c.get('market','') }}"/></div>
+<div><label>Technical owner</label><input name="technical_owner" value="{{ c.get('technical_owner', user.display_name or user.username) }}"/></div>
+<div><label>Sponsor</label><input name="sponsor" value="{{ c.get('sponsor','') }}"/></div>
+<div><label>Status</label><select name="status"><option>{{ c.get('status','Sandbox') }}</option><option>Production</option><option>Prototype</option><option>Sandbox</option><option>In Progress</option><option>Planned</option></select></div>
+<div><label>TMF level</label><input name="tmf_level" value="{{ c.get('tmf_level','L1') }}"/></div>
+<div><label>Impact</label><select name="impact"><option>{{ c.get('impact','Medium') }}</option><option>Low</option><option>Medium</option><option>High</option><option>Very High</option></select></div>
+<div><label>Frequency</label><input name="frequency" value="{{ c.get('frequency','') }}"/></div>
+<div><label>Annual value (Rand)</label><input type="number" name="annual_value" value="{{ c.get('annual_value',0) }}"/></div>
+<div><label>Implementation cost (Rand)</label><input type="number" name="implementation_cost" value="{{ c.get('implementation_cost',0) }}"/></div>
+<div><label>Hours saved</label><input type="number" name="hours_saved" value="{{ c.get('hours_saved',0) }}"/></div>
+<div><label>MTTR improvement %</label><input type="number" name="mttr_improvement" value="{{ c.get('mttr_improvement',0) }}"/></div>
+<div><label>Reuse score 1-5</label><input type="number" name="reuse_score" min="0" max="5" value="{{ c.get('reuse_score',0) }}"/><p class="help">1 Team · 2 Function · 3 Domain · 4 Cross-Domain · 5 Cross-Market</p></div>
+<div class="wide"><p class="help">Owner: {{ c.get('created_by', user.username) }}. Admin users can only update/delete records they created or where Technical owner matches their username, display name, or email.</p><button type="submit">Save use case</button><a class="btn secondary" href="/admin">Clear form</a></div>
+</form></section>
+
+{% if user.role == 'super_admin' %}<section class="panel"><div class="panel-head"><h2>Import / update use cases from CSV</h2><span>safe merge import</span></div>
+<p>Import safely updates matching IDs, adds new IDs, prevents duplicate IDs, and keeps existing records that are not in the CSV.</p>
+<form method="post" action="/import/csv" enctype="multipart/form-data" class="toolbar"><input type="file" name="file" accept=".csv" required/><button type="submit">Import CSV</button><a class="btn secondary" href="/export/csv">Download CSV template/current data</a></form>
+</section>{% endif %}
+
+<section class="panel admin-table"><div class="panel-head"><h2>Existing use cases</h2><span>{{ use_cases|length }} records</span></div><div class="table-wrap"><table><thead><tr><th>Actions</th><th>ID</th><th>Name</th><th>Owner</th><th>Domain</th><th>Status</th><th>TMF</th><th>KPI</th><th>Annual value</th><th>Cost</th><th>Hours</th><th>Reuse</th><th>Sponsor</th></tr></thead><tbody>{% for c in use_cases %}<tr><td><a class="btn secondary" href="/admin?edit={{ c.id }}">Edit</a><form method="post" action="/admin/delete-use-case" style="display:inline"><input type="hidden" name="id" value="{{ c.id }}"/><button type="submit" onclick="return confirm('Delete {{ c.id }}?')">Delete</button></form></td><td>{{ c.id }}</td><td>{{ c.name }}</td><td>{{ c.created_by or c.technical_owner }}</td><td>{{ c.domain }}</td><td>{{ c.status }}</td><td>{{ c.tmf_level }}</td><td>{{ c.kpi }}</td><td>R{{ "{:,.0f}".format(c.annual_value) }}</td><td>R{{ "{:,.0f}".format(c.implementation_cost) }}</td><td>{{ "{:,}".format(c.hours_saved) }}</td><td>{{ c.reuse_score }}</td><td>{{ c.sponsor }}</td></tr>{% endfor %}</tbody></table></div></section>
+</main><script>
+(function(){
+  const root=document.body;
+  const btn=document.getElementById('themeToggle');
+  const exportLink=document.getElementById('exportPpt');
+  const saved=localStorage.getItem('asocTheme')||'dark';
+  function setTheme(theme){
+    root.dataset.theme=theme;
+    localStorage.setItem('asocTheme',theme);
+    if(btn) btn.textContent=theme==='dark'?'Light mode':'Dark mode';
+    if(exportLink) exportLink.href='/export/pptx?theme='+encodeURIComponent(theme);
+  }
+  if(btn) btn.addEventListener('click',()=>setTheme(root.dataset.theme==='dark'?'light':'dark'));
+  setTheme(saved);
+})();
+</script></body></html>

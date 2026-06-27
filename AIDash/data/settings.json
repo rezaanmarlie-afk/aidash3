@@ -1,0 +1,62 @@
+{
+  "dashboard_title": "Executive Dashboard",
+  "portfolio_period": "FY27\u2013FY29",
+  "active_year": "FY27",
+  "tmf_current": 1.8,
+  "tmf_target": 3.0,
+  "targets": {
+    "FY27": {
+      "annual_benefits": 150000000,
+      "hours_saved": 55000,
+      "production_use_cases": 10,
+      "tmf_maturity": 3.0,
+      "reusable_use_cases_percent": 80,
+      "portfolio_roi_percent": 250
+    },
+    "FY28": {
+      "annual_benefits": 40000000,
+      "hours_saved": 60000,
+      "production_use_cases": 15,
+      "tmf_maturity": 3.5,
+      "reusable_use_cases_percent": 70,
+      "portfolio_roi_percent": 300
+    },
+    "FY29": {
+      "annual_benefits": 55000000,
+      "hours_saved": 70000,
+      "production_use_cases": 20,
+      "tmf_maturity": 4.0,
+      "reusable_use_cases_percent": 80,
+      "portfolio_roi_percent": 350
+    }
+  },
+  "executive_decisions": [
+    "Approve a formal AI benefits tracking model.",
+    "Prioritise funding for Auto Config Engine and Agentic API Automation.",
+    "Confirm monthly ME dashboard reporting cadence.",
+    "Mandate KPI baseline capture for every AI use case.",
+    "Drive Build Once, Deploy Many reuse across markets."
+  ],
+  "big_bets": [
+    {
+      "name": "Auto Config Engine",
+      "description": "Intent \u2192 Config \u2192 Execute. Major provisioning and configuration acceleration."
+    },
+    {
+      "name": "Agentic API Automation",
+      "description": "MCP-enabled execution across Network, IT and Fintech domains."
+    },
+    {
+      "name": "Closed Loop Fault Management",
+      "description": "Detect \u2192 Analyse \u2192 Decide \u2192 Act \u2192 Validate."
+    },
+    {
+      "name": "Unified Incident Intelligence",
+      "description": "Single conversational view of Network, IT and Fintech faults."
+    },
+    {
+      "name": "Digital Twin",
+      "description": "Future simulation and predictive operations layer."
+    }
+  ]
+}

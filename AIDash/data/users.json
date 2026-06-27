@@ -1,0 +1,10 @@
+[
+  {
+    "username": "admin",
+    "display_name": "System Administrator",
+    "email": "admin@local",
+    "role": "super_admin",
+    "password_hash": "pbkdf2_sha256$b23e53760445a65501ea0269f1d46308$a897b45a6466ed7c27d697325b2f02dfefb50917c384e56bc8c71b88fe695d18",
+    "active": true
+  }
+]

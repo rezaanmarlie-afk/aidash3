@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.vscode/
+.idea/
+
+# Runtime files
+*.log
+
+# Keep user data out of Git
+data/*.db
+data/users.json
+data/use_cases.json
