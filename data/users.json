@@ -1,0 +1,32 @@
+[
+  {
+    "username": "admin",
+    "display_name": "System Administrator",
+    "email": "admin@local",
+    "role": "super_admin",
+    "password_hash": "pbkdf2_sha256$0b59c44ced666752b89208fdf390b68a$92840eed9ad2ff28133c848d27196ece750355602c3b9e32497d6688d393b563",
+    "active": true
+  },
+  {
+    "username": "fmadmin",
+    "display_name": "FM Admin",
+    "email": "rezaan.marlie@vodacom.co.za",
+    "role": "admin",
+    "password_hash": "pbkdf2_sha256$80accfd8d30b640021e478ec39472b25$1e0863f93b7223c4d6b330a26b3450286b161fe165a5cabc4efac152f32253d3",
+    "active": true,
+    "domains": [
+      "Fault Management"
+    ]
+  },
+  {
+    "username": "cmadmin",
+    "display_name": "CM Admin",
+    "email": "",
+    "role": "admin",
+    "password_hash": "pbkdf2_sha256$5c753c67e66020fef32d867ec120601f$203460149488d475a18fcd61aa1d4688d8634c64c16bf220774df7bb56cd1996",
+    "active": true,
+    "domains": [
+      "Configuration Management"
+    ]
+  }
+]
