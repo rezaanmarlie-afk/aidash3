@@ -1962,6 +1962,7 @@ async def health():
         "max_failed_logins": MAX_FAILED_LOGINS,
         "lockout_seconds": LOCKOUT_SECONDS,
         "enterprise_operations": True,
+        "polish_release": "5.1.1",
         "operations_modules": ["security", "audit", "backups", "system"],
     }
 
