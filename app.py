@@ -1,6 +1,6 @@
 
 from fastapi import FastAPI, Request, Form, UploadFile, File, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, PlainTextResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -1760,6 +1760,185 @@ async def delete_user(request: Request, username: str = Form(...), user=Depends(
     _audit_event(request, user.get("username"), "user_deleted", "user", username)
     return RedirectResponse("/admin/users", status_code=303)
 
+
+
+# -----------------------------
+# V5.1 Enterprise Operations
+# -----------------------------
+
+def _read_audit_events(limit: int = 500, actor: str = "", action: str = "", q: str = ""):
+    events = []
+    try:
+        if not AUDIT_LOG_FILE.exists():
+            return []
+        lines = AUDIT_LOG_FILE.read_text(encoding="utf-8").splitlines()[-max(limit * 2, limit):]
+        for line in reversed(lines):
+            try:
+                ev = json.loads(line)
+            except Exception:
+                continue
+            if actor and actor.lower() not in str(ev.get("actor", "")).lower():
+                continue
+            if action and action.lower() not in str(ev.get("action", "")).lower():
+                continue
+            if q:
+                blob = json.dumps(ev, ensure_ascii=False).lower()
+                if q.lower() not in blob:
+                    continue
+            events.append(ev)
+            if len(events) >= limit:
+                break
+    except Exception:
+        return []
+    return events
+
+
+def _backup_files():
+    files = []
+    try:
+        for root in [DB_BACKUP_DIR, BACKUP_DIR]:
+            if not root.exists():
+                continue
+            for path in root.rglob("*"):
+                if path.is_file() and path.name not in [".gitkeep"]:
+                    try:
+                        rel = path.relative_to(BACKUP_DIR)
+                    except Exception:
+                        rel = path.name
+                    files.append({
+                        "name": path.name,
+                        "relative_path": str(rel).replace("\\", "/"),
+                        "size": path.stat().st_size,
+                        "size_kb": round(path.stat().st_size / 1024, 1),
+                        "modified": datetime.datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+        files.sort(key=lambda x: x["modified"], reverse=True)
+    except Exception:
+        pass
+    return files
+
+
+def _manual_sqlite_backup():
+    if not DB_FILE.exists():
+        return None
+    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    DB_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    target = DB_BACKUP_DIR / f"aidash_v5_manual_{stamp}.db"
+    shutil.copy2(DB_FILE, target)
+    return target
+
+
+def _security_metrics():
+    users = load_users()
+    events = _read_audit_events(limit=1000)
+    failed_events = [e for e in events if "failed" in str(e.get("action", "")) or e.get("action") == "login_failed"]
+    exports = [e for e in events if str(e.get("action", "")).startswith("export")]
+    backups = _backup_files()
+    controls = [
+        {"name": "HTTPS / Render TLS", "status": True, "note": "Render public service uses HTTPS."},
+        {"name": "Secure cookies", "status": SECURE_COOKIES, "note": "Session cookie secure flag enabled."},
+        {"name": "Session timeout", "status": SESSION_MAX_AGE_SECONDS <= 3600, "note": f"{SESSION_MAX_AGE_SECONDS} seconds."},
+        {"name": "SQLite persistent database", "status": STORAGE_BACKEND == "sqlite" and DB_FILE.exists(), "note": str(DB_FILE)},
+        {"name": "Persistent data directory", "status": str(DATA_DIR).startswith('/var/data') or DATA_DIR.exists(), "note": str(DATA_DIR)},
+        {"name": "Mandatory MFA", "status": MFA_REQUIRED, "note": f"Issuer: {MFA_ISSUER}"},
+        {"name": "MFA adoption", "status": len(users) > 0 and count_mfa_enabled_users() == len([u for u in users if u.get('active', True)]), "note": f"{count_mfa_enabled_users()} enabled"},
+        {"name": "Account lockout", "status": MAX_FAILED_LOGINS <= 5 and LOCKOUT_SECONDS >= 900, "note": f"{MAX_FAILED_LOGINS} attempts / {LOCKOUT_SECONDS//60} minutes"},
+        {"name": "Audit log", "status": AUDIT_LOG_FILE.exists(), "note": str(AUDIT_LOG_FILE)},
+        {"name": "Backups", "status": BACKUP_DIR.exists(), "note": f"{len(backups)} backup file(s)"},
+        {"name": "CSRF protection", "status": False, "note": "Planned for next hardening increment."},
+        {"name": "Security headers", "status": False, "note": "Planned for next hardening increment."},
+    ]
+    score = round(sum(1 for c in controls if c["status"]) / max(len(controls), 1) * 100)
+    return {
+        "users_total": len(users),
+        "active_users": len([u for u in users if u.get("active", True)]),
+        "mfa_enabled": count_mfa_enabled_users(),
+        "locked_users": count_locked_users(),
+        "failed_events": len(failed_events),
+        "exports": len(exports),
+        "backups": len(backups),
+        "db_size_kb": round(DB_FILE.stat().st_size / 1024, 1) if DB_FILE.exists() else 0,
+        "audit_size_kb": round(AUDIT_LOG_FILE.stat().st_size / 1024, 1) if AUDIT_LOG_FILE.exists() else 0,
+        "score": score,
+        "controls": controls,
+        "recent_events": events[:10],
+        "latest_backup": backups[0] if backups else None,
+    }
+
+
+@app.get("/admin/security", response_class=HTMLResponse)
+async def security_centre(request: Request, user=Depends(require_super_admin)):
+    return templates.TemplateResponse("security.html", {"request": request, "user": user, "metrics": _security_metrics()})
+
+
+@app.get("/admin/audit", response_class=HTMLResponse)
+async def audit_centre(request: Request, actor: str = "", action: str = "", q: str = "", limit: int = 300, user=Depends(require_super_admin)):
+    events = _read_audit_events(limit=max(50, min(limit, 2000)), actor=actor, action=action, q=q)
+    actions = sorted({e.get("action", "") for e in _read_audit_events(limit=2000) if e.get("action")})
+    return templates.TemplateResponse("audit.html", {"request": request, "user": user, "events": events, "actor": actor, "action": action, "q": q, "limit": limit, "actions": actions})
+
+
+@app.get("/admin/audit/export")
+async def audit_export_csv(actor: str = "", action: str = "", q: str = "", user=Depends(require_super_admin)):
+    events = _read_audit_events(limit=5000, actor=actor, action=action, q=q)
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=["ts", "actor", "action", "entity_type", "entity_id", "ip", "details"])
+    writer.writeheader()
+    for e in events:
+        writer.writerow({
+            "ts": e.get("ts", ""),
+            "actor": e.get("actor", ""),
+            "action": e.get("action", ""),
+            "entity_type": e.get("entity_type", ""),
+            "entity_id": e.get("entity_id", ""),
+            "ip": e.get("ip", ""),
+            "details": json.dumps(e.get("details", {}), ensure_ascii=False),
+        })
+    return StreamingResponse(io.BytesIO(out.getvalue().encode("utf-8")), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=execair_audit_log.csv"})
+
+
+@app.get("/admin/backups", response_class=HTMLResponse)
+async def backup_centre(request: Request, message: str = "", error: str = "", user=Depends(require_super_admin)):
+    return templates.TemplateResponse("backups.html", {"request": request, "user": user, "files": _backup_files(), "db_file": DB_FILE, "backup_dir": BACKUP_DIR, "message": message, "error": error})
+
+
+@app.post("/admin/backups/create")
+async def create_backup(request: Request, user=Depends(require_super_admin)):
+    try:
+        target = _manual_sqlite_backup()
+        if not target:
+            return RedirectResponse("/admin/backups?error=SQLite database not found", status_code=303)
+        _audit_event(request, user.get("username"), "manual_backup_created", "backup", target.name, {"path": str(target)})
+        return RedirectResponse(f"/admin/backups?message=Backup created: {urllib.parse.quote(target.name)}", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/admin/backups?error={urllib.parse.quote(str(exc))}", status_code=303)
+
+
+@app.get("/admin/backups/download")
+async def download_backup(path: str, user=Depends(require_super_admin)):
+    requested = (BACKUP_DIR / path).resolve()
+    base = BACKUP_DIR.resolve()
+    if not str(requested).startswith(str(base)) or not requested.exists() or not requested.is_file():
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return FileResponse(str(requested), filename=requested.name, media_type="application/octet-stream")
+
+
+@app.get("/admin/system", response_class=HTMLResponse)
+async def system_centre(request: Request, user=Depends(require_super_admin)):
+    env = {
+        "DATA_DIR": str(DATA_DIR),
+        "STORAGE_BACKEND": STORAGE_BACKEND,
+        "DB_FILE": str(DB_FILE),
+        "SECURE_COOKIES": SECURE_COOKIES,
+        "SESSION_MAX_AGE_SECONDS": SESSION_MAX_AGE_SECONDS,
+        "MFA_REQUIRED": MFA_REQUIRED,
+        "MFA_ISSUER": MFA_ISSUER,
+        "MAX_FAILED_LOGINS": MAX_FAILED_LOGINS,
+        "LOCKOUT_SECONDS": LOCKOUT_SECONDS,
+        "SCHEMA_VERSION": get_schema_version(),
+    }
+    return templates.TemplateResponse("system.html", {"request": request, "user": user, "env": env, "health": _security_metrics()})
+
 @app.get("/health")
 async def health():
     return {
@@ -1782,6 +1961,8 @@ async def health():
         "locked_users": count_locked_users(),
         "max_failed_logins": MAX_FAILED_LOGINS,
         "lockout_seconds": LOCKOUT_SECONDS,
+        "enterprise_operations": True,
+        "operations_modules": ["security", "audit", "backups", "system"],
     }
 
 @app.head("/")

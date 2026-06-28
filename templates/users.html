@@ -17,11 +17,12 @@
     <p>Create viewer/admin access, assign domain edit rights, maintain MFA and unlock locked accounts.</p>
   </div>
   <div class="nav">
-    <a href="/">Dashboard</a><a href="/admin/use-cases">Admin</a><a href="/profile">My Profile</a><a href="/logout">Logout</a>
+    <a href="/">Dashboard</a><a href="/admin/use-cases">Admin</a><a href="/admin/security">Security</a><a href="/admin/audit">Audit</a><a href="/admin/backups">Backups</a><a href="/profile">My Profile</a><a href="/logout">Logout</a>
     <button type="button" id="themeToggle" class="theme-toggle">Light mode</button><span class="badge">{{ user.role }}</span>
   </div>
 </header>
 <main>
+<div class="ops-nav" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0"><a href="/admin/security">Security Centre</a><a href="/admin/audit">Audit Centre</a><a href="/admin/backups">Backup Centre</a><a href="/admin/system">System Centre</a></div>
 {% if error %}<div class="alert">{{ error }}</div>{% endif %}
 
 <section class="security-box">
