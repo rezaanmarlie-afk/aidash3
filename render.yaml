@@ -4,3 +4,5 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+
+# Required env vars on Render: DATA_DIR=/var/data, SECURE_COOKIES=true, APP_ENV=production, STORAGE_BACKEND=sqlite

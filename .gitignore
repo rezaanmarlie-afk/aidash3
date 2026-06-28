@@ -2,13 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 .env
-.vscode/
-.idea/
-
-# Runtime files
+.env.*
+.DS_Store
 *.log
-
-# Keep user data out of Git
-data/*.db
-data/users.json
-data/use_cases.json
