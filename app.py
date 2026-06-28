@@ -149,17 +149,50 @@ def _record_failed_login(request: Request, username: str):
     rec = failures.setdefault(username, {"count": 0, "first_failed_at": _utc_now()})
     rec["count"] = int(rec.get("count", 0)) + 1
     rec["last_failed_at"] = _utc_now()
+    locked_now = False
     if rec["count"] >= MAX_FAILED_LOGINS:
+        if not rec.get("locked_until") or float(rec.get("locked_until", 0) or 0) < time.time():
+            locked_now = True
         rec["locked_until"] = time.time() + LOCKOUT_SECONDS
         rec["lockout_at"] = _utc_now()
     _save_security(sec)
-    _audit_event(request, username or "unknown", "login_failed", "user", username, {"count": rec.get("count", 0)})
+    _audit_event(request, username or "unknown", "login_failed", "user", username, {"count": rec.get("count", 0), "locked": bool(rec.get("locked_until"))})
+    if locked_now:
+        _audit_event(request, username or "unknown", "account_locked", "user", username, {"failed_attempts": rec.get("count", 0), "lockout_seconds": LOCKOUT_SECONDS})
 
 
 def _clear_failed_login(username: str):
     sec = _safe_load_security()
     sec.get("login_failures", {}).pop(username.strip().lower(), None)
     _save_security(sec)
+
+
+def _lock_record(username: str):
+    sec = _safe_load_security()
+    return sec.get("login_failures", {}).get(str(username or "").strip().lower(), {}) or {}
+
+def _lock_status(username: str):
+    username = str(username or "").strip().lower()
+    rec = _lock_record(username)
+    locked_until = float(rec.get("locked_until", 0) or 0)
+    remaining = int(max(0, locked_until - time.time()))
+    return {
+        "count": int(rec.get("count", 0) or 0),
+        "locked": remaining > 0,
+        "remaining_seconds": remaining,
+        "locked_until": locked_until,
+        "last_failed_at": rec.get("last_failed_at", ""),
+        "lockout_at": rec.get("lockout_at", ""),
+    }
+
+def lock_status_map(users):
+    return {u.get("username", ""): _lock_status(u.get("username", "")) for u in users}
+
+def _unlock_user(username: str):
+    _clear_failed_login(username)
+
+def count_locked_users():
+    return sum(1 for u in load_users() if _lock_status(u.get("username", "")).get("locked"))
 
 
 def validate_password_strength(password: str):
@@ -827,6 +860,10 @@ async def mfa_setup_verify(request: Request, code: str = Form(...)):
     user = pending_mfa_user(request)
     if not user:
         return RedirectResponse("/login?error=Please sign in first", status_code=303)
+    locked, remaining = _is_locked(user.get("username", ""))
+    if locked:
+        request.session.clear()
+        return RedirectResponse(f"/login?error=Account temporarily locked. Try again in {max(1, remaining//60)} minutes", status_code=303)
     if not verify_totp(user.get("mfa_secret", ""), code):
         _record_failed_login(request, user.get("username", ""))
         _audit_event(request, user.get("username"), "mfa_setup_failed", "user", user.get("username"))
@@ -1588,6 +1625,7 @@ async def manage_users(request: Request, edit: str = "", error: str = "", user=D
         "users": users,
         "edit_user": edit_user,
         "domains": available_domains(),
+        "lock_statuses": lock_status_map(users),
         "user": user,
         "error": error
     })
@@ -1665,6 +1703,48 @@ async def reset_user_mfa(request: Request, username: str = Form(...), user=Depen
     _audit_event(request, user.get("username"), "mfa_reset", "user", username)
     return RedirectResponse("/admin/users", status_code=303)
 
+@app.post("/admin/users/unlock")
+async def unlock_user(request: Request, username: str = Form(...), user=Depends(require_super_admin)):
+    username = username.strip().lower()
+    _unlock_user(username)
+    _audit_event(request, user.get("username"), "account_unlocked", "user", username)
+    return RedirectResponse("/admin/users", status_code=303)
+
+@app.post("/admin/users/force-mfa-reset")
+async def force_user_mfa_reset(request: Request, username: str = Form(...), user=Depends(require_super_admin)):
+    username = username.strip().lower()
+    users = load_users()
+    target = next((u for u in users if u.get("username") == username), None)
+    if not target:
+        return redirect_with_error("/admin/users", "User not found")
+    target["mfa_enabled"] = False
+    target["mfa_secret"] = ""
+    target["mfa_confirmed_at"] = ""
+    save_users(users)
+    _unlock_user(username)
+    _audit_event(request, user.get("username"), "mfa_force_reenrol", "user", username)
+    return RedirectResponse("/admin/users", status_code=303)
+
+@app.post("/admin/users/set-active")
+async def set_user_active(request: Request, username: str = Form(...), active: str = Form(...), user=Depends(require_super_admin)):
+    username = username.strip().lower()
+    active_bool = str(active).lower() == "true"
+    if username == user.get("username") and not active_bool:
+        return redirect_with_error("/admin/users", "You cannot disable your own account while logged in")
+    users = load_users()
+    target = next((u for u in users if u.get("username") == username), None)
+    if not target:
+        return redirect_with_error("/admin/users", "User not found")
+    super_admins = [u for u in users if u.get("role") == "super_admin" and u.get("active", True)]
+    if target.get("role") == "super_admin" and len(super_admins) <= 1 and not active_bool:
+        return redirect_with_error("/admin/users", "Cannot deactivate the last super admin")
+    target["active"] = active_bool
+    save_users(users)
+    if not active_bool:
+        _unlock_user(username)
+    _audit_event(request, user.get("username"), "user_enabled" if active_bool else "user_disabled", "user", username)
+    return RedirectResponse("/admin/users", status_code=303)
+
 @app.post("/admin/users/delete")
 async def delete_user(request: Request, username: str = Form(...), user=Depends(require_super_admin)):
     username = username.strip().lower()
@@ -1699,6 +1779,9 @@ async def health():
         "mfa_required": MFA_REQUIRED,
         "mfa_issuer": MFA_ISSUER,
         "mfa_enabled_users": count_mfa_enabled_users(),
+        "locked_users": count_locked_users(),
+        "max_failed_logins": MAX_FAILED_LOGINS,
+        "lockout_seconds": LOCKOUT_SECONDS,
     }
 
 @app.head("/")

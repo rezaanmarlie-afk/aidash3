@@ -1,17 +1,90 @@
-<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>User Management · ASOC AI ME Dashboard</title><link rel="stylesheet" href="/static/style.css"/></head>
-<body><header class="topbar"><div><div class="eyebrow">Vodacom ASOC · Access Control</div><h1>User Management</h1><p>Create viewer/admin access, assign domain edit rights, and maintain existing users.</p></div><div class="nav"><a href="/">Dashboard</a><a href="/admin/use-cases">Admin</a><a href="/profile">My Profile</a><a href="/logout">Logout</a><button type="button" id="themeToggle" class="theme-toggle">Light mode</button><span class="badge">{{ user.role }}</span></div></header>
-<main>{% if error %}<div class="alert">{{ error }}</div>{% endif %}
-<section class="panel"><div class="panel-head"><h2>{% if edit_user %}Edit user: {{ edit_user.username }}{% else %}Add user{% endif %}</h2><span>role and domain access</span></div>
-{% set eu = edit_user if edit_user else {} %}
-<form method="post" action="/admin/users/save" class="form-grid">
-<div><label>Username</label><input name="username" required {% if edit_user %}readonly{% endif %} value="{{ eu.get('username','') }}" placeholder="e.g. rezaan"/></div>
-<div><label>Display name</label><input name="display_name" value="{{ eu.get('display_name','') }}"/></div>
-<div><label>Email</label><input name="email" value="{{ eu.get('email','') }}"/></div>
-<div><label>Role</label><select name="role"><option value="{{ eu.get('role','viewer') }}">{{ eu.get('role','viewer') }}</option><option value="viewer">viewer</option><option value="admin">admin</option><option value="super_admin">super_admin</option></select></div>
-<div><label>Password</label><input type="password" name="password" placeholder="Leave blank to keep current password"/></div>
-<div><label>Active</label><select name="active"><option value="{{ 'true' if eu.get('active', True) else 'false' }}">{{ 'true' if eu.get('active', True) else 'false' }}</option><option value="true">true</option><option value="false">false</option></select></div>
-<div class="wide"><label>Admin domain access</label><div class="checkbox-grid">{% for d in domains %}<label class="check-item"><input type="checkbox" name="domains" value="{{ d }}" {% if d in eu.get('domains', []) %}checked{% endif %}/> {{ d }}</label>{% endfor %}</div><p class="help">Set Role = admin for domain-based editing. Assign one or more domains. Viewers only see the dashboard. Super admins can edit everything.</p></div>
-<div class="wide"><button type="submit">Save user</button><a class="btn secondary" href="/admin/users">Clear form</a></div>
-</form></section>
-<section class="panel admin-table"><div class="panel-head"><h2>Existing users</h2><span>{{ users|length }} users</span></div><div class="table-wrap"><table><thead><tr><th>Actions</th><th>Username</th><th>Name</th><th>Email</th><th>Role</th><th>Domain edit access</th><th>Active</th><th>MFA</th></tr></thead><tbody>{% for u in users %}<tr><td><a class="btn secondary" href="/admin/users?edit={{ u.username }}">Edit</a><form method="post" action="/admin/users/delete" style="display:inline"><input type="hidden" name="username" value="{{ u.username }}"/><button type="submit" onclick="return confirm('Delete {{ u.username }}?')">Delete</button></form></td><td>{{ u.username }}</td><td>{{ u.display_name }}</td><td>{{ u.email }}</td><td><span class="pill">{{ u.role }}</span></td><td>{{ u.domains|default([])|join(', ') if u.domains else '—' }}</td><td>{{ u.active }}</td><td>{% if u.mfa_enabled %}<span class="pill">enabled</span>{% else %}<span class="pill muted">setup required</span>{% endif %}<form method="post" action="/admin/users/reset-mfa" style="display:inline"><input type="hidden" name="username" value="{{ u.username }}"/><button type="submit" onclick="return confirm('Reset MFA for {{ u.username }}?')">Reset MFA</button></form></td></tr>{% endfor %}</tbody></table></div></section>
-</main><script>(function(){const root=document.body,btn=document.getElementById('themeToggle'),saved=localStorage.getItem('asocTheme')||'dark';function setTheme(t){root.dataset.theme=t;localStorage.setItem('asocTheme',t);if(btn)btn.textContent=t==='dark'?'Light mode':'Dark mode';}if(btn)btn.addEventListener('click',()=>setTheme(root.dataset.theme==='dark'?'light':'dark'));setTheme(saved);})();</script></body></html>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>User Management · ASOC AI ME Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+  <style>
+    .mini-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.mini-actions form{display:inline}.status-good{color:#22c55e;font-weight:700}.status-warn{color:#f59e0b;font-weight:700}.status-bad{color:#ef4444;font-weight:700}.small-note{font-size:12px;opacity:.75}.security-box{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}.security-metric{border:1px solid var(--border,rgba(255,255,255,.12));border-radius:14px;padding:14px;background:var(--card,#12151f)}.security-metric strong{display:block;font-size:22px;margin-top:4px}.btn.danger,button.danger{background:#ef4444;color:#fff}.btn.warning,button.warning{background:#f59e0b;color:#111827}
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="eyebrow">Vodacom ASOC · Access Control</div>
+    <h1>User Management</h1>
+    <p>Create viewer/admin access, assign domain edit rights, maintain MFA and unlock locked accounts.</p>
+  </div>
+  <div class="nav">
+    <a href="/">Dashboard</a><a href="/admin/use-cases">Admin</a><a href="/profile">My Profile</a><a href="/logout">Logout</a>
+    <button type="button" id="themeToggle" class="theme-toggle">Light mode</button><span class="badge">{{ user.role }}</span>
+  </div>
+</header>
+<main>
+{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+
+<section class="security-box">
+  <div class="security-metric"><span>Total users</span><strong>{{ users|length }}</strong></div>
+  <div class="security-metric"><span>MFA enabled</span><strong>{{ users|selectattr('mfa_enabled')|list|length }}</strong></div>
+  <div class="security-metric"><span>Locked users</span><strong>{{ lock_statuses.values()|selectattr('locked')|list|length }}</strong></div>
+  <div class="security-metric"><span>Active users</span><strong>{{ users|selectattr('active')|list|length }}</strong></div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>{% if edit_user %}Edit user: {{ edit_user.username }}{% else %}Add user{% endif %}</h2><span>role, domain access and account state</span></div>
+  {% set eu = edit_user if edit_user else {} %}
+  <form method="post" action="/admin/users/save" class="form-grid">
+    <div><label>Username</label><input name="username" required {% if edit_user %}readonly{% endif %} value="{{ eu.get('username','') }}" placeholder="e.g. rezaan"/></div>
+    <div><label>Display name</label><input name="display_name" value="{{ eu.get('display_name','') }}"/></div>
+    <div><label>Email</label><input name="email" value="{{ eu.get('email','') }}"/></div>
+    <div><label>Role</label><select name="role"><option value="{{ eu.get('role','viewer') }}">{{ eu.get('role','viewer') }}</option><option value="viewer">viewer</option><option value="admin">admin</option><option value="super_admin">super_admin</option></select></div>
+    <div><label>Password</label><input type="password" name="password" placeholder="Leave blank to keep current password"/></div>
+    <div><label>Active</label><select name="active"><option value="{{ 'true' if eu.get('active', True) else 'false' }}">{{ 'true' if eu.get('active', True) else 'false' }}</option><option value="true">true</option><option value="false">false</option></select></div>
+    <div class="wide"><label>Admin domain access</label><div class="checkbox-grid">{% for d in domains %}<label class="check-item"><input type="checkbox" name="domains" value="{{ d }}" {% if d in eu.get('domains', []) %}checked{% endif %}/> {{ d }}</label>{% endfor %}</div><p class="help">Set Role = admin for domain-based editing. Assign one or more domains. Viewers only see the dashboard and can export PowerPoint. Super admins can edit everything.</p></div>
+    <div class="wide"><button type="submit">Save user</button><a class="btn secondary" href="/admin/users">Clear form</a></div>
+  </form>
+</section>
+
+<section class="panel admin-table">
+  <div class="panel-head"><h2>Existing users</h2><span>{{ users|length }} users</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Actions</th><th>Username</th><th>Name</th><th>Email</th><th>Role</th><th>Domain edit access</th><th>Active</th><th>MFA</th><th>Lockout</th></tr></thead>
+    <tbody>
+      {% for u in users %}
+      {% set ls = lock_statuses.get(u.username, {}) %}
+      <tr>
+        <td>
+          <div class="mini-actions">
+            <a class="btn secondary" href="/admin/users?edit={{ u.username }}">Edit</a>
+            {% if u.active %}
+            <form method="post" action="/admin/users/set-active"><input type="hidden" name="username" value="{{ u.username }}"/><input type="hidden" name="active" value="false"/><button class="warning" type="submit" onclick="return confirm('Disable {{ u.username }}?')">Disable</button></form>
+            {% else %}
+            <form method="post" action="/admin/users/set-active"><input type="hidden" name="username" value="{{ u.username }}"/><input type="hidden" name="active" value="true"/><button type="submit">Enable</button></form>
+            {% endif %}
+            <form method="post" action="/admin/users/delete"><input type="hidden" name="username" value="{{ u.username }}"/><button class="danger" type="submit" onclick="return confirm('Delete {{ u.username }}?')">Delete</button></form>
+          </div>
+        </td>
+        <td>{{ u.username }}</td><td>{{ u.display_name }}</td><td>{{ u.email }}</td><td><span class="pill">{{ u.role }}</span></td><td>{{ u.domains|default([])|join(', ') if u.domains else '—' }}</td>
+        <td>{% if u.active %}<span class="status-good">active</span>{% else %}<span class="status-bad">disabled</span>{% endif %}</td>
+        <td>
+          {% if u.mfa_enabled %}<span class="pill">enabled</span><div class="small-note">{{ u.mfa_confirmed_at or '' }}</div>{% else %}<span class="pill muted">setup required</span>{% endif %}
+          <div class="mini-actions" style="margin-top:6px">
+            <form method="post" action="/admin/users/reset-mfa"><input type="hidden" name="username" value="{{ u.username }}"/><button type="submit" onclick="return confirm('Reset MFA for {{ u.username }}?')">Reset MFA</button></form>
+            <form method="post" action="/admin/users/force-mfa-reset"><input type="hidden" name="username" value="{{ u.username }}"/><button type="submit" onclick="return confirm('Force MFA re-setup for {{ u.username }}?')">Force MFA</button></form>
+          </div>
+        </td>
+        <td>
+          {% if ls.locked %}<span class="status-bad">locked</span><div class="small-note">{{ (ls.remaining_seconds // 60) + 1 }} min remaining</div>{% elif ls.count %}<span class="status-warn">{{ ls.count }} failed</span><div class="small-note">last: {{ ls.last_failed_at }}</div>{% else %}<span class="status-good">clear</span>{% endif %}
+          <div class="mini-actions" style="margin-top:6px">
+            <form method="post" action="/admin/users/unlock"><input type="hidden" name="username" value="{{ u.username }}"/><button type="submit">Unlock</button></form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+</main>
+<script>(function(){const root=document.body,btn=document.getElementById('themeToggle'),saved=localStorage.getItem('asocTheme')||'dark';function setTheme(t){root.dataset.theme=t;localStorage.setItem('asocTheme',t);if(btn)btn.textContent=t==='dark'?'Light mode':'Dark mode';}if(btn)btn.addEventListener('click',()=>setTheme(root.dataset.theme==='dark'?'light':'dark'));setTheme(saved);})();</script>
+</body></html>
