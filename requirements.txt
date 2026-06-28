@@ -8,3 +8,5 @@ matplotlib==3.9.2
 numpy==1.26.4
 Pillow==10.4.0
 itsdangerous==2.2.0
+
+qrcode[pil]==7.4.2
