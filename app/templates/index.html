@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <div class="eyebrow">Pre-PI control</div>
+    <h1>PI Readiness & Manager Sign-Off</h1>
+    <p>Inspect every prioritised top-level ticket, its linked Epics and Stories against the mandatory PI prerequisites.</p>
+  </div>
+  <div class="deadline-card">
+    <span>Manager sign-off deadline</span>
+    <strong>{{ deadline }}</strong>
+  </div>
+</section>
+
+<div class="release-banner"><strong>Build v{{ app_version }}</strong><span>Select which controls apply, including project-specific Jira fields, then export the high-level portfolio view or complete evidence report.</span></div>
+
+<section class="panel filter-panel">
+  <form method="get" action="/" class="filter-grid" id="scan-form">
+    <input type="hidden" name="run" value="1">
+    <label>Jira project<input name="project" value="{{ filters.project }}" required></label>
+    <label>PI Priority (ASOC)<input name="pi_value" value="{{ filters.pi_value }}" required></label>
+    <label>Priority<input name="priority" value="{{ filters.priority }}" required></label>
+    <label class="wide">Scrum Master
+      <div class="user-picker">
+        <input id="scrum-master-name" name="scrum_master_name" value="{{ filters.scrum_master_name }}" placeholder="Search by name" autocomplete="off">
+        <input id="scrum-master-id" name="scrum_master_id" value="{{ filters.scrum_master_id }}" placeholder="Jira account ID" required>
+        <div id="user-results" class="user-results"></div>
+      </div>
+    </label>
+    <fieldset class="criteria-exclusions full-width">
+      <legend>Exclude criteria from this compliance review</legend>
+      <p>Excluded controls are visible in the evidence, carry no scoring weight and do not block Manager Sign-Off.</p>
+      <div class="criteria-options">
+        {% for criterion in criteria_options %}
+        <label class="criteria-option"><input type="checkbox" name="exclude" value="{{ criterion.key }}" {% if criterion.key in filters.excluded_criteria %}checked{% endif %}> {{ criterion.label }}</label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <div class="filter-actions full-width">
+      <button class="primary" type="submit">Run compliance check</button>
+      {% if scan %}
+      <a class="secondary pdf-action" href="/export-summary.pdf?{{ filter_query }}">Export high-level PDF</a>
+      <a class="secondary pdf-action" href="/export-details.pdf?{{ filter_query }}">Export all ticket details PDF</a>
+      <a class="secondary" href="/export.csv?{{ filter_query }}">Summary CSV</a>
+      <a class="secondary" href="/export-details.csv?{{ filter_query }}">Detailed CSV</a>
+      {% endif %}
+    </div>
+  </form>
+</section>
+
+{% if error %}<div class="alert error"><strong>Unable to complete the scan.</strong><br>{{ error }}</div>{% endif %}
+
+{% if scan %}
+
+{% if scan.config.additional_criteria %}
+<section class="panel additional-criteria-summary">
+  <div class="eyebrow">Additional Jira field controls applied</div>
+  <div class="excluded-pills">{% for criterion in scan.config.additional_criteria %}<span class="pill custom-control">{{ criterion.label }} - {{ criterion.rule|replace('_', ' ') }} - {{ criterion.applies_to|replace('_', ' ') }}</span>{% endfor %}</div>
+  <p class="muted">These project fields are included in every relevant ticket score, detailed CSV, detailed PDF and Manager Sign-Off snapshot.</p>
+</section>
+{% endif %}
+
+{% if scan.excluded_criteria %}
+<section class="panel exclusion-summary">
+  <div class="eyebrow">Controls excluded from this run</div>
+  <div class="excluded-pills">{% for criterion in scan.excluded_criteria %}<span class="pill excluded">{{ criterion.label }}</span>{% endfor %}</div>
+  <p class="muted">These controls remain visible as Excluded in the ticket detail and exports, but are not included in the percentages or Manager Sign-Off blocking decision.</p>
+</section>
+{% endif %}
+
+<section class="kpi-grid six">
+  <div class="kpi"><span>Top-level tickets</span><strong>{{ scan.summary.initiatives }}</strong></div>
+  <div class="kpi good"><span>Hierarchy ready</span><strong>{{ scan.summary.compliant }}</strong></div>
+  <div class="kpi bad"><span>Blocked</span><strong>{{ scan.summary.blocked }}</strong></div>
+  <div class="kpi"><span>Current approvals</span><strong>{{ scan.summary.approved }}</strong></div>
+  <div class="kpi"><span>Ticket compliance</span><strong>{{ scan.summary.ticket_score }}%</strong></div>
+  <div class="kpi"><span>Hierarchy compliance</span><strong>{{ scan.summary.hierarchy_score }}%</strong></div>
+</section>
+
+<section class="panel query-panel">
+  <div class="eyebrow">How the percentages work</div>
+  <p class="muted"><strong>Ticket compliance</strong> measures only the selected top-level Jira ticket. <strong>Hierarchy compliance</strong> measures that ticket, all linked Epics and Stories, plus the hierarchy controls. Manager approval remains locked until the full hierarchy is compliant.</p>
+</section>
+
+<section class="panel query-panel">
+  <div class="eyebrow">Scan diagnostics</div>
+  <p class="muted">Completed in {{ scan.diagnostics.elapsed_seconds }} seconds using {{ scan.diagnostics.jira_requests }} Jira API request(s). Base query returned {{ scan.diagnostics.base_matches }} item(s).{% if scan.diagnostics.issue_type_filter_enabled %} The optional issue-type filter skipped {{ scan.diagnostics.non_initiative_matches_skipped }} item(s).{% else %} No issue-type filter was applied.{% endif %} Loaded {{ scan.diagnostics.epics_loaded }} Epics and {{ scan.diagnostics.stories_loaded }} Stories{% if scan.diagnostics.cache_hit %} from the recent scan cache{% endif %}. Jira issue types returned: {{ scan.diagnostics.issue_types_returned|join(', ') }}.</p>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div><h2>Prioritised Signature Projects</h2><p>The top-level ticket score is shown separately from the full hierarchy score used for Manager Sign-Off.</p></div>
+  </div>
+  {% if scan.results %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Top-level ticket</th><th>Hierarchy</th><th>Ticket compliance</th><th>Full hierarchy</th><th>Failures</th><th>Manager Sign-Off</th><th></th></tr></thead>
+      <tbody>
+      {% for row in scan.results %}
+        <tr>
+          <td><strong>{{ row.initiative.key }}</strong><br><span class="muted">{{ row.initiative.summary }}</span><br><span class="tiny">{{ row.initiative.issue_type }}</span></td>
+          <td>{{ row.epic_count }} Epics<br>{{ row.story_count }} Stories</td>
+          <td>
+            <div class="score-line"><span class="score-bar"><i style="width: {{ row.ticket_score }}%"></i></span><strong>{{ row.ticket_score }}%</strong></div>
+            <span class="pill {{ 'pass' if row.ticket_compliant else 'fail' }}">{{ 'Compliant' if row.ticket_compliant else row.ticket_failure_count ~ ' ticket failure(s)' }}</span>
+          </td>
+          <td>
+            <div class="score-line"><span class="score-bar"><i style="width: {{ row.hierarchy_score }}%"></i></span><strong>{{ row.hierarchy_score }}%</strong></div>
+            <span class="pill {{ 'pass' if row.compliant else 'fail' }}">{{ 'Ready' if row.compliant else 'Remediation required' }}</span>
+          </td>
+          <td><strong>{{ row.failure_count }}</strong><div class="tiny">Across full hierarchy</div></td>
+          <td>
+            {% if row.latest_signoff %}
+              <span class="pill {{ 'pass' if row.latest_signoff.decision == 'APPROVED' and row.latest_signoff.is_current else 'warn' }}">{{ row.latest_signoff.decision }}</span>
+              {% if not row.latest_signoff.is_current %}<div class="tiny">Outdated: Jira evidence changed</div>{% endif %}
+            {% else %}<span class="muted">Pending</span>{% endif %}
+          </td>
+          <td><a class="secondary small" href="/initiative/{{ row.initiative.key }}?{{ filter_query }}">Inspect & sign off</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <div class="empty-state"><h3>No top-level tickets matched the Jira scope</h3><p>Compare the executed JQL below with Jira. If the base query count above is greater than zero, open Settings and switch off <strong>Restrict the base query to the configured Initiative issue type</strong>.</p></div>
+  {% endif %}
+</section>
+
+<section class="panel query-panel">
+  <div class="eyebrow">Executed JQL</div>
+  <code>{{ scan.jql }}</code>
+</section>
+{% endif %}
+{% endblock %}

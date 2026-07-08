@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Sign in · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="login-card">
+  <div class="eyebrow">Controlled access</div>
+  <h1>Manager Sign-Off</h1>
+  <p>Authenticate to inspect PI readiness and record an auditable decision.</p>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="stack-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <label>Username<input name="username" autocomplete="username" required></label>
+    <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="primary" type="submit">Sign in</button>
+  </form>
+</section>
+{% endblock %}

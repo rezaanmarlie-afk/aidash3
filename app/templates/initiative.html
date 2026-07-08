@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block content %}
+{% if error %}<div class="alert error">{{ error }}</div>{% elif result %}
+<div class="breadcrumb action-row">
+  <a href="/?run=1&{{ filter_query }}">← Back to dashboard</a>
+  <div class="detail-export-actions">
+    <a class="secondary small" href="/initiative/{{ result.initiative.key }}/export.pdf?{{ filter_query }}">Export this hierarchy PDF</a>
+    <a class="secondary small" href="/initiative/{{ result.initiative.key }}/export.csv?{{ filter_query }}">Export this hierarchy CSV</a>
+  </div>
+</div>
+<section class="hero compact">
+  <div>
+    <div class="eyebrow">{{ filters.pi_value }} · {{ filters.priority }}</div>
+    <h1>{{ result.initiative.key }} — {{ result.initiative.summary }}</h1>
+    <p>{{ result.initiative.issue_type }} · {{ result.epic_count }} Epics · {{ result.story_count }} Stories · Snapshot {{ result.snapshot_hash[:12] }}</p>
+  </div>
+  <div class="readiness-pair">
+    <div class="readiness-orb {{ 'good' if result.ticket_compliant else 'bad' }}"><strong>{{ result.ticket_score }}%</strong><span>Ticket compliance</span></div>
+    <div class="readiness-orb {{ 'good' if result.compliant else 'bad' }}"><strong>{{ result.hierarchy_score }}%</strong><span>Full hierarchy</span></div>
+  </div>
+</section>
+
+
+{% if scan.excluded_criteria %}
+<section class="panel exclusion-summary">
+  <div class="eyebrow">Controls excluded from this review</div>
+  <div class="excluded-pills">{% for criterion in scan.excluded_criteria %}<span class="pill excluded">{{ criterion.label }}</span>{% endfor %}</div>
+  <p class="muted">Excluded controls do not contribute to the ticket or hierarchy percentages and do not block approval. They are retained in the exported audit evidence.</p>
+</section>
+{% endif %}
+
+<section class="panel query-panel">
+  <div class="eyebrow">Score interpretation</div>
+  <p><strong>{{ result.initiative.key }} ticket compliance is {{ result.ticket_score }}%</strong>: {{ result.initiative.passed_count }} of {{ result.initiative.applicable_count }} applicable ticket controls pass. The <strong>{{ result.hierarchy_score }}% full hierarchy score</strong> includes the top-level ticket, every linked Epic and Story, and the structural hierarchy controls. Manager approval uses the full hierarchy result.</p>
+</section>
+
+{% if request.query_params.get('saved') %}<div class="alert success">Manager decision recorded successfully.</div>{% endif %}
+
+<section class="panel">
+  <div class="panel-heading"><div><h2>Hierarchy controls</h2><p>Confirms that the top-level ticket has delivery Epics and every Epic has Stories.</p></div></div>
+  <div class="check-grid">
+  {% for check in result.structural_checks %}
+    <article class="check-card {{ 'excluded' if check.excluded else ('pass' if check.passed else 'fail') }}"><div class="check-icon">{{ '—' if check.excluded else ('✓' if check.passed else '!') }}</div><div><strong>{{ check.label }}</strong><p>{{ check.evidence }}</p>{% if check.excluded %}<small class="excluded-note">Excluded from this review</small>{% elif not check.passed %}<small>{{ check.remediation }}</small>{% endif %}</div></article>
+  {% endfor %}
+  </div>
+</section>
+
+{% macro issue_card(item, level) %}
+<article class="issue-card level-{{ level }}">
+  <div class="issue-heading">
+    <div><span class="issue-type">{{ item.issue_type }}</span><h3>{{ item.key }} — {{ item.summary }}</h3><p>{{ item.status }}{% if item.assignee %} · {{ item.assignee }}{% endif %} · {{ item.passed_count }}/{{ item.applicable_count }} applicable controls passed</p></div>
+    <span class="pill {{ 'pass' if item.passed else 'fail' }}">{{ item.score }}% · {{ 'Compliant' if item.passed else item.failure_count ~ ' failure(s)' }}</span>
+  </div>
+  <div class="criteria-table">
+  {% for check in item.checks %}
+    <div class="criterion {{ 'excluded' if check.excluded else ('na' if not check.applicable else ('pass' if check.passed else 'fail')) }}">
+      <span class="criterion-mark">{{ 'EX' if check.excluded else ('—' if not check.applicable else ('✓' if check.passed else '✕')) }}</span>
+      <div><strong>{{ check.label }}</strong><p>{{ check.evidence }}</p>{% if check.excluded %}<small class="excluded-note">Not scored for this review</small>{% elif check.applicable and not check.passed %}<small>{{ check.remediation }}</small>{% endif %}</div>
+    </div>
+  {% endfor %}
+  </div>
+</article>
+{% endmacro %}
+
+<section class="hierarchy">
+  {{ issue_card(result.initiative, 0) }}
+  {% for epic in result.epics %}
+    {{ issue_card(epic, 1) }}
+    {% for story in epic.stories %}{{ issue_card(story, 2) }}{% endfor %}
+  {% endfor %}
+</section>
+
+<section class="panel signoff-panel">
+  <div class="panel-heading"><div><h2>Manager Sign-Off</h2><p>The decision is saved with the exact full-hierarchy compliance snapshot so later Jira changes invalidate the old approval.</p></div></div>
+  {% if result.latest_signoff %}
+    <div class="previous-decision">
+      <strong>Latest decision: {{ result.latest_signoff.decision }}</strong>
+      <span>{{ result.latest_signoff.created_at }} by {{ result.latest_signoff.signer_name }}</span>
+      {% if not result.latest_signoff.is_current %}<span class="pill warn">Outdated snapshot</span>{% endif %}
+      {% if result.latest_signoff.comment %}<p>{{ result.latest_signoff.comment }}</p>{% endif %}
+    </div>
+  {% endif %}
+  <form method="post" action="/initiative/{{ result.initiative.key }}/signoff" class="stack-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <input type="hidden" name="project" value="{{ filters.project }}">
+    <input type="hidden" name="pi_value" value="{{ filters.pi_value }}">
+    <input type="hidden" name="priority" value="{{ filters.priority }}">
+    <input type="hidden" name="scrum_master_id" value="{{ filters.scrum_master_id }}">
+    <input type="hidden" name="scrum_master_name" value="{{ filters.scrum_master_name }}">
+    <input type="hidden" name="excluded_criteria" value="{{ filters.excluded_criteria|join(',') }}">
+    <label>Manager comment<textarea name="comment" rows="4" placeholder="Required when returning the Initiative for remediation"></textarea></label>
+    {% if writeback_enabled %}<label class="checkbox"><input type="checkbox" name="jira_writeback" value="1"> Add the decision as a Jira comment and labels</label>{% endif %}
+    <div class="decision-actions">
+      <button class="danger" type="submit" name="decision" value="RETURNED">Return for remediation</button>
+      <button class="primary" type="submit" name="decision" value="APPROVED" {% if not result.compliant %}disabled title="All hierarchy prerequisite failures must be resolved before approval"{% endif %}>Approve for {{ filters.pi_value }}</button>
+    </div>
+    {% if not result.compliant %}<p class="form-note">Approval is locked because {{ result.failure_count }} prerequisite failure(s) remain across the full hierarchy. The top-level ticket itself is {{ result.ticket_score }}% compliant.</p>{% endif %}
+  </form>
+</section>
+{% endif %}
+{% endblock %}

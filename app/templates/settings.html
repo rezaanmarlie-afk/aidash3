@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero compact"><div><div class="eyebrow">Administration</div><h1>Jira compliance configuration</h1><p>Map the core controls and add project-specific Jira fields as enforceable compliance criteria.</p></div></section>
+{% if saved %}<div class="alert success">Settings saved. The next scan will use the updated compliance criteria.</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<form method="post" action="/settings" id="settings-form">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+
+  <section class="panel">
+    <div class="panel-heading"><div><div class="eyebrow">Core controls</div><h2>Jira field mapping</h2><p>Map the standard PI readiness fields used across every review.</p></div></div>
+    <div class="settings-grid">
+      {% macro select_field(name, label, selected, required=false) %}
+        <label>{{ label }}
+          <select name="{{ name }}" {% if required %}required{% endif %}>
+            <option value="">- Not mapped -</option>
+            {% for field in cfg.fields %}<option value="{{ field.id }}" {% if selected == field.id %}selected{% endif %}>{{ field.name }} ({{ field.id }})</option>{% endfor %}
+          </select>
+        </label>
+      {% endmacro %}
+      {{ select_field('pi_priority', 'PI Priority (ASOC)', cfg.pi_field.id if cfg.pi_field else '', true) }}
+      {{ select_field('scrum_master', 'Scrum Master', cfg.sm_field.id if cfg.sm_field else '', true) }}
+      <label>PI Priority JQL field clause<input name="pi_jql_clause" value="{{ cfg.pi_clause }}" required></label>
+      <label>Scrum Master JQL field clause<input name="scrum_master_jql_clause" value="{{ cfg.sm_clause }}" required></label>
+      {{ select_field('dor', 'Definition of Ready / DoR / DOR', cfg.mapping.get('dor', '')) }}
+      {{ select_field('dod', 'Definition of Done / DoD / DOD', cfg.mapping.get('dod', '')) }}
+      {{ select_field('acceptance_criteria', 'Acceptance Criteria', cfg.mapping.get('acceptance_criteria', '')) }}
+      {{ select_field('dependencies', 'Dependencies', cfg.mapping.get('dependencies', '')) }}
+      {{ select_field('story_points', 'Story Points / sizing', cfg.mapping.get('story_points', '')) }}
+      {{ select_field('squad', 'Squad field (optional)', cfg.mapping.get('squad', '')) }}
+      <label>Initiative issue type<input name="initiative_issue_type" value="{{ cfg.initiative_issue_type }}" required></label>
+      <label>ASOC-internal Jira project keys<input name="internal_projects" value="{{ cfg.internal_projects|join(', ') }}" placeholder="NMGOS, ASOC, OSS"></label>
+      <label class="checkbox full"><input type="checkbox" name="restrict_initiative_type" value="1" {% if cfg.restrict_initiative_type %}checked{% endif %}> Add an Initiative issue-type condition to the root JQL. Leave this off when the Jira query already returns the correct top-level tickets.</label>
+      <label class="checkbox full"><input type="checkbox" name="allow_description_fallback" value="1" {% if cfg.allow_description_fallback %}checked{% endif %}> Permit clearly labelled Description sections when no dedicated DoR, DoD or Acceptance Criteria field is populated.</label>
+    </div>
+  </section>
+
+  <section class="panel custom-criteria-panel">
+    <div class="panel-heading">
+      <div><div class="eyebrow">Additional controls</div><h2>Project field compliance criteria</h2><p>Load fields configured for a Jira project, then define how each selected field must comply.</p></div>
+      <button type="button" class="secondary" id="add-criterion">Add criterion</button>
+    </div>
+
+    <div class="project-field-loader">
+      <label>Jira project used for field discovery
+        <input id="field-project" name="field_project" value="{{ cfg.field_project }}" placeholder="NMGOS" required>
+      </label>
+      <button type="button" class="secondary" id="load-project-fields">Load fields from Jira project</button>
+      <div id="field-load-status" class="field-load-status">
+        {% if cfg.project_fields %}<strong>{{ cfg.project_fields|length }}</strong> fields loaded via {{ cfg.project_field_source|replace('_', ' ')|replace('-', ' ') }}.{% endif %}
+      </div>
+    </div>
+    {% if cfg.project_field_warning %}<div class="alert warning" id="project-field-warning">{{ cfg.project_field_warning }}</div>{% else %}<div class="alert warning hidden" id="project-field-warning"></div>{% endif %}
+
+    <div class="custom-criteria-help">
+      <span><strong>Required:</strong> field must contain a value.</span>
+      <span><strong>One of:</strong> enter allowed values separated by commas.</span>
+      <span><strong>Scope:</strong> apply to all tickets or only one hierarchy level.</span>
+    </div>
+
+    <div class="table-wrap custom-criteria-wrap">
+      <table class="custom-criteria-table">
+        <thead><tr><th>Jira field</th><th>Compliance label</th><th>Rule</th><th>Expected value</th><th>Applies to</th><th></th></tr></thead>
+        <tbody id="custom-criteria-body">
+          {% for criterion in cfg.additional_criteria %}
+          <tr class="custom-criterion-row">
+            <td>
+              <input type="hidden" name="custom_id" value="{{ criterion.id }}">
+              <select name="custom_field_id" class="custom-field-select" data-selected="{{ criterion.field_id }}" required>
+                <option value="">- Select Jira field -</option>
+                {% for field in cfg.project_fields %}<option value="{{ field.id }}" {% if field.id == criterion.field_id %}selected{% endif %}>{{ field.name }} ({{ field.id }}){% if field.required %} - required by Jira{% endif %}</option>{% endfor %}
+                {% if criterion.field_id and criterion.field_id not in cfg.project_field_ids %}<option value="{{ criterion.field_id }}" selected>{{ criterion.field_name }} ({{ criterion.field_id }}) - saved field</option>{% endif %}
+              </select>
+            </td>
+            <td><input name="custom_label" value="{{ criterion.label }}" placeholder="e.g. Business owner assigned"></td>
+            <td><select name="custom_rule" class="custom-rule-select">{% for rule in custom_rule_options %}<option value="{{ rule.key }}" {% if rule.key == criterion.rule %}selected{% endif %}>{{ rule.label }}</option>{% endfor %}</select></td>
+            <td><input name="custom_expected" value="{{ criterion.expected }}" placeholder="Not needed for Required"></td>
+            <td><select name="custom_applies_to"><option value="all" {% if criterion.applies_to == 'all' %}selected{% endif %}>All ticket levels</option><option value="top_level" {% if criterion.applies_to == 'top_level' %}selected{% endif %}>Top-level tickets only</option><option value="epic" {% if criterion.applies_to == 'epic' %}selected{% endif %}>Epics only</option><option value="story" {% if criterion.applies_to == 'story' %}selected{% endif %}>Stories only</option></select></td>
+            <td><button type="button" class="danger small remove-criterion">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <template id="custom-criterion-template">
+      <tr class="custom-criterion-row">
+        <td>
+          <input type="hidden" name="custom_id" value="">
+          <select name="custom_field_id" class="custom-field-select" required>
+            <option value="">- Select Jira field -</option>
+            {% for field in cfg.project_fields %}<option value="{{ field.id }}">{{ field.name }} ({{ field.id }}){% if field.required %} - required by Jira{% endif %}</option>{% endfor %}
+          </select>
+        </td>
+        <td><input name="custom_label" value="" placeholder="e.g. Business owner assigned"></td>
+        <td><select name="custom_rule" class="custom-rule-select">{% for rule in custom_rule_options %}<option value="{{ rule.key }}">{{ rule.label }}</option>{% endfor %}</select></td>
+        <td><input name="custom_expected" value="" placeholder="Not needed for Required"></td>
+        <td><select name="custom_applies_to"><option value="all">All ticket levels</option><option value="top_level">Top-level tickets only</option><option value="epic">Epics only</option><option value="story">Stories only</option></select></td>
+        <td><button type="button" class="danger small remove-criterion">Remove</button></td>
+      </tr>
+    </template>
+  </section>
+
+  <section class="panel settings-save-bar">
+    <div><strong>Compliance basis</strong><p>Changes affect future scans and produce a new sign-off snapshot. Existing approvals will show as outdated if the compliance basis changes.</p></div>
+    <button class="primary" type="submit">Save all compliance settings</button>
+  </section>
+</form>
+
+<section class="panel query-panel"><div class="eyebrow">Dependency rule</div><p>A ticket passes only when dependencies are explicitly declared as none, or a dependency is documented and linked. Story dependencies must link to one of the configured ASOC-internal project keys.</p></section>
+{% endblock %}

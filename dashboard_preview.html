@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ASOC PI Readiness &amp; Manager Sign-Off</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">V</div>
+      <div>
+        <strong>ASOC PI Readiness &amp; Manager Sign-Off</strong>
+        <span>PI readiness governance</span>
+      </div>
+    </div>
+    
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/settings">Settings</a>
+      <form method="post" action="/logout" class="inline-form">
+        <input type="hidden" name="csrf" value="eu-JdP9lkOtDIKMwEhxlpEouHNfuv0WR">
+        <button class="link-button" type="submit">Sign out</button>
+      </form>
+    </nav>
+    
+  </header>
+  <div class="mode-banner">Demo mode is active. The app is using built-in sample Jira data.</div>
+  <main class="page-shell">
+    
+<section class="hero">
+  <div>
+    <div class="eyebrow">Pre-PI control</div>
+    <h1>PI Readiness & Manager Sign-Off</h1>
+    <p>Inspect every prioritised top-level ticket, its linked Epics and Stories against the mandatory PI prerequisites.</p>
+  </div>
+  <div class="deadline-card">
+    <span>Manager sign-off deadline</span>
+    <strong>2026-07-07T16:00:00+02:00</strong>
+  </div>
+</section>
+
+<section class="panel filter-panel">
+  <form method="get" action="/" class="filter-grid" id="scan-form">
+    <input type="hidden" name="run" value="1">
+    <label>Jira project<input name="project" value="NMGOS" required></label>
+    <label>PI Priority (ASOC)<input name="pi_value" value="PI26" required></label>
+    <label>Priority<input name="priority" value="Critical" required></label>
+    <label class="wide">Scrum Master
+      <div class="user-picker">
+        <input id="scrum-master-name" name="scrum_master_name" value="Demo Scrum Master" placeholder="Search by name" autocomplete="off">
+        <input id="scrum-master-id" name="scrum_master_id" value="70121:c296bec5-b136-48b7-9345-a1e16f9f38dc" placeholder="Jira account ID" required>
+        <div id="user-results" class="user-results"></div>
+      </div>
+    </label>
+    <div class="filter-actions">
+      <button class="primary" type="submit">Run compliance check</button>
+      
+      <a class="secondary" href="/export.csv?project=NMGOS&pi_value=PI26&priority=Critical&scrum_master_id=70121%3Ac296bec5-b136-48b7-9345-a1e16f9f38dc&scrum_master_name=Demo%20Scrum%20Master">Export summary CSV</a>
+      <a class="secondary" href="/export-details.csv?project=NMGOS&pi_value=PI26&priority=Critical&scrum_master_id=70121%3Ac296bec5-b136-48b7-9345-a1e16f9f38dc&scrum_master_name=Demo%20Scrum%20Master">Export detailed compliance</a>
+      
+    </div>
+  </form>
+</section>
+
+
+
+
+<section class="kpi-grid six">
+  <div class="kpi"><span>Top-level tickets</span><strong>2</strong></div>
+  <div class="kpi good"><span>Hierarchy ready</span><strong>1</strong></div>
+  <div class="kpi bad"><span>Blocked</span><strong>1</strong></div>
+  <div class="kpi"><span>Current approvals</span><strong>0</strong></div>
+  <div class="kpi"><span>Ticket compliance</span><strong>50.0%</strong></div>
+  <div class="kpi"><span>Hierarchy compliance</span><strong>66.7%</strong></div>
+</section>
+
+<section class="panel query-panel">
+  <div class="eyebrow">How the percentages work</div>
+  <p class="muted"><strong>Ticket compliance</strong> measures only the selected top-level Jira ticket. <strong>Hierarchy compliance</strong> measures that ticket, all linked Epics and Stories, plus the hierarchy controls. Manager approval remains locked until the full hierarchy is compliant.</p>
+</section>
+
+<section class="panel query-panel">
+  <div class="eyebrow">Scan diagnostics</div>
+  <p class="muted">Completed in 0.01 seconds using 0 Jira API request(s). Base query returned 2 item(s). No issue-type filter was applied. Loaded 2 Epics and 3 Stories. Jira issue types returned: Initiative.</p>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div><h2>Prioritised Signature Projects</h2><p>The top-level ticket score is shown separately from the full hierarchy score used for Manager Sign-Off.</p></div>
+  </div>
+  
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Top-level ticket</th><th>Hierarchy</th><th>Ticket compliance</th><th>Full hierarchy</th><th>Failures</th><th>Manager Sign-Off</th><th></th></tr></thead>
+      <tbody>
+      
+        <tr>
+          <td><strong>NMGOS-100</strong><br><span class="muted">Automate service fulfilment validation</span><br><span class="tiny">Initiative</span></td>
+          <td>1 Epics<br>2 Stories</td>
+          <td>
+            <div class="score-line"><span class="score-bar"><i style="width: 100.0%"></i></span><strong>100.0%</strong></div>
+            <span class="pill pass">Compliant</span>
+          </td>
+          <td>
+            <div class="score-line"><span class="score-bar"><i style="width: 100.0%"></i></span><strong>100.0%</strong></div>
+            <span class="pill pass">Ready</span>
+          </td>
+          <td><strong>0</strong><div class="tiny">Across full hierarchy</div></td>
+          <td>
+            <span class="muted">Pending</span>
+          </td>
+          <td><a class="secondary small" href="/initiative/NMGOS-100?project=NMGOS&pi_value=PI26&priority=Critical&scrum_master_id=70121%3Ac296bec5-b136-48b7-9345-a1e16f9f38dc&scrum_master_name=Demo%20Scrum%20Master">Inspect & sign off</a></td>
+        </tr>
+      
+        <tr>
+          <td><strong>NMGOS-200</strong><br><span class="muted">Legacy inventory data remediation</span><br><span class="tiny">Initiative</span></td>
+          <td>1 Epics<br>1 Stories</td>
+          <td>
+            <div class="score-line"><span class="score-bar"><i style="width: 0.0%"></i></span><strong>0.0%</strong></div>
+            <span class="pill fail">4 ticket failure(s)</span>
+          </td>
+          <td>
+            <div class="score-line"><span class="score-bar"><i style="width: 33.3%"></i></span><strong>33.3%</strong></div>
+            <span class="pill fail">Remediation required</span>
+          </td>
+          <td><strong>10</strong><div class="tiny">Across full hierarchy</div></td>
+          <td>
+            <span class="muted">Pending</span>
+          </td>
+          <td><a class="secondary small" href="/initiative/NMGOS-200?project=NMGOS&pi_value=PI26&priority=Critical&scrum_master_id=70121%3Ac296bec5-b136-48b7-9345-a1e16f9f38dc&scrum_master_name=Demo%20Scrum%20Master">Inspect & sign off</a></td>
+        </tr>
+      
+      </tbody>
+    </table>
+  </div>
+  
+</section>
+
+<section class="panel query-panel">
+  <div class="eyebrow">Executed JQL</div>
+  <code>project in (&#34;NMGOS&#34;) AND &#34;PI Priority (ASOC)&#34; = &#34;PI26&#34; AND priority = &#34;Critical&#34; AND &#34;Scrum Master[User Picker (single user)]&#34; = &#34;70121:c296bec5-b136-48b7-9345-a1e16f9f38dc&#34; ORDER BY key ASC</code>
+</section>
+
+
+  </main>
+</body>
+</html>

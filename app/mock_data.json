@@ -1,0 +1,135 @@
+{
+  "users": [
+    {"accountId": "70121:c296bec5-b136-48b7-9345-a1e16f9f38dc", "displayName": "ASOC Scrum Master"},
+    {"accountId": "5f00abc123", "displayName": "NMGOS Delivery Lead"}
+  ],
+  "fields": [
+    {"id": "customfield_11001", "name": "PI Priority (ASOC)", "clauseNames": ["PI Priority (ASOC)"]},
+    {"id": "customfield_11002", "name": "Scrum Master", "clauseNames": ["Scrum Master[User Picker (single user)]"]},
+    {"id": "customfield_11003", "name": "Definition of Ready", "clauseNames": ["Definition of Ready"]},
+    {"id": "customfield_11004", "name": "Definition of Done", "clauseNames": ["Definition of Done"]},
+    {"id": "customfield_11005", "name": "Acceptance Criteria", "clauseNames": ["Acceptance Criteria"]},
+    {"id": "customfield_11006", "name": "Dependencies", "clauseNames": ["Dependencies"]},
+    {"id": "customfield_11007", "name": "Story Points", "clauseNames": ["Story Points"]}
+  ],
+  "initiatives": [
+    {
+      "key": "NMGOS-100",
+      "fields": {
+        "summary": "Automate service fulfilment validation",
+        "issuetype": {"name": "Initiative"},
+        "status": {"name": "Ready for PI"},
+        "assignee": {"displayName": "Initiative Owner"},
+        "description": "Definition of Ready:\nBusiness outcome, scope and architecture are approved.\n\nDefinition of Done:\nProduction deployment, monitoring and handover completed.\n\nAcceptance Criteria:\nEnd-to-end fulfilment validation runs automatically.",
+        "customfield_11003": "Scope, owner, architecture and funding confirmed.",
+        "customfield_11004": "Production release and operational handover complete.",
+        "customfield_11005": "95% of eligible orders validated automatically with audit evidence.",
+        "customfield_11006": "No known dependencies",
+        "issuelinks": []
+      }
+    },
+    {
+      "key": "NMGOS-200",
+      "fields": {
+        "summary": "Legacy inventory data remediation",
+        "issuetype": {"name": "Initiative"},
+        "status": {"name": "Proposed"},
+        "assignee": {"displayName": "Data Lead"},
+        "description": "Initial concept only.",
+        "customfield_11003": "",
+        "customfield_11004": "",
+        "customfield_11005": "",
+        "customfield_11006": "Dependent on source system extracts",
+        "issuelinks": []
+      }
+    }
+  ],
+  "children": {
+    "NMGOS-100": [
+      {
+        "key": "NMGOS-110",
+        "fields": {
+          "summary": "Build validation rules service",
+          "issuetype": {"name": "Epic"},
+          "status": {"name": "Ready"},
+          "assignee": {"displayName": "Platform Squad"},
+          "customfield_11003": "Technical design and API contract approved.",
+          "customfield_11004": "Rules service deployed with observability and support runbook.",
+          "customfield_11005": "Valid and invalid orders produce deterministic outcomes.",
+          "customfield_11006": "No known dependencies",
+          "issuelinks": []
+        }
+      }
+    ],
+    "NMGOS-110": [
+      {
+        "key": "NMGOS-111",
+        "fields": {
+          "summary": "Implement product rule evaluation",
+          "issuetype": {"name": "Story"},
+          "status": {"name": "Ready"},
+          "assignee": {"displayName": "Developer One"},
+          "customfield_11003": "API examples and test data available.",
+          "customfield_11004": "Code merged, tests pass and deployed to test.",
+          "customfield_11005": "Given a supported product, the API returns all applicable validation rules.",
+          "customfield_11006": "No known dependencies",
+          "customfield_11007": 5,
+          "issuelinks": [],
+          "timetracking": {}
+        }
+      },
+      {
+        "key": "NMGOS-112",
+        "fields": {
+          "summary": "Publish validation audit events",
+          "issuetype": {"name": "Story"},
+          "status": {"name": "Ready"},
+          "assignee": {"displayName": "Developer Two"},
+          "customfield_11003": "Kafka topic and event schema approved.",
+          "customfield_11004": "Events published and observable in test.",
+          "customfield_11005": "Each validation produces a traceable audit event.",
+          "customfield_11006": "Depends on NMGOS-305 owned by an ASOC internal squad",
+          "customfield_11007": 3,
+          "issuelinks": [
+            {"type": {"name": "Blocks"}, "outwardIssue": {"key": "NMGOS-305", "fields": {"summary": "Provision Kafka topic"}}}
+          ],
+          "timetracking": {}
+        }
+      }
+    ],
+    "NMGOS-200": [
+      {
+        "key": "NMGOS-210",
+        "fields": {
+          "summary": "Profile legacy inventory sources",
+          "issuetype": {"name": "Epic"},
+          "status": {"name": "Draft"},
+          "assignee": {"displayName": "Data Squad"},
+          "customfield_11003": "Source list available.",
+          "customfield_11004": "",
+          "customfield_11005": "",
+          "customfield_11006": "No known dependencies",
+          "issuelinks": []
+        }
+      }
+    ],
+    "NMGOS-210": [
+      {
+        "key": "NMGOS-211",
+        "fields": {
+          "summary": "Extract sample inventory records",
+          "issuetype": {"name": "Story"},
+          "status": {"name": "Draft"},
+          "assignee": null,
+          "customfield_11003": "",
+          "customfield_11004": "",
+          "customfield_11005": "Sample extraction completed.",
+          "customfield_11006": "Waiting for source owner",
+          "customfield_11007": null,
+          "issuelinks": [],
+          "timetracking": {}
+        }
+      }
+    ]
+  }
+}

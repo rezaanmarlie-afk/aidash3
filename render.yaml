@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: asoc-pi-readiness
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATA_DIR
+        value: /var/data
+      - key: MOCK_MODE
+        value: "true"
+      - key: APP_SECRET
+        generateValue: true
+      - key: APP_ADMIN_USERNAME
+        value: admin
+      - key: APP_ADMIN_PASSWORD
+        sync: false
+      - key: JIRA_BASE_URL
+        sync: false
+      - key: JIRA_AUTH_MODE
+        value: basic
+      - key: JIRA_USERNAME
+        sync: false
+      - key: JIRA_API_TOKEN
+        sync: false
+      - key: JIRA_VERIFY_SSL
+        value: "true"
+    disk:
+      name: asoc-pi-readiness-data
+      mountPath: /var/data
+      sizeGB: 1

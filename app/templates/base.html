@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css?v={{ app_version|urlencode }}">
+  <script defer src="/static/app.js?v={{ app_version|urlencode }}"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">V</div>
+      <div>
+        <div class="brand-title"><strong>{{ app_name }}</strong><span class="version-badge">v{{ app_version }}</span></div>
+        <span>PI readiness governance</span>
+      </div>
+    </div>
+    {% if authenticated %}
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/settings">Settings</a>
+      <form method="post" action="/logout" class="inline-form">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <button class="link-button" type="submit">Sign out</button>
+      </form>
+    </nav>
+    {% endif %}
+  </header>
+  {% if mock_mode %}<div class="mode-banner">Demo mode is active. The app is using built-in sample Jira data.</div>{% endif %}
+  <main class="page-shell">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="build-footer">Running ASOC PI Readiness build <strong>v{{ app_version }}</strong></footer>
+</body>
+</html>
