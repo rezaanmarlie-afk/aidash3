@@ -248,6 +248,11 @@ DEFAULT_FIELD_NAMES = {
 }
 
 
+def _point_value(value: float | int | None) -> float | int:
+    """Return story point totals without noisy trailing decimals."""
+    number = round(float(value or 0), 2)
+    return int(number) if number.is_integer() else number
+
 class ComplianceEngine:
     def __init__(
         self,
@@ -262,6 +267,7 @@ class ComplianceEngine:
         self.allow_description_fallback = allow_description_fallback
         self.excluded_criteria = {str(key).strip() for key in (excluded_criteria or []) if str(key).strip()}
         self.additional_criteria = [dict(item) for item in (additional_criteria or []) if item.get('field_id')]
+        self.story_point_field_ids = self._configured_story_point_field_ids(field_map)
 
     def _apply_exclusion(self, check: CheckResult) -> CheckResult:
         if check.key not in self.excluded_criteria:
@@ -276,12 +282,65 @@ class ComplianceEngine:
             excluded=True,
         )
 
+    @staticmethod
+    def _configured_story_point_field_ids(field_map: dict[str, Any]) -> list[str]:
+        """Return every Story Points field ID that should be tested.
+
+        Jira sites often expose more than one similarly named Story Points
+        field. A saved mapping can be technically valid but belong to another
+        project/team, which makes every roll-up look like zero. The engine
+        therefore checks the explicitly mapped field first and then falls back
+        to any candidate Story Points fields discovered from Jira metadata.
+        """
+        candidates: list[str] = []
+        primary = field_map.get('story_points')
+        if isinstance(primary, str) and primary.strip():
+            candidates.append(primary.strip())
+        for key in ('story_points_candidates', '_story_points_candidates'):
+            extra = field_map.get(key)
+            if isinstance(extra, str):
+                candidates.extend(part.strip() for part in extra.split(',') if part.strip())
+            elif isinstance(extra, (list, tuple, set)):
+                candidates.extend(str(part).strip() for part in extra if str(part).strip())
+        return list(dict.fromkeys(candidates))
+
     def _field(self, issue: dict, logical_name: str) -> Any:
         field_id = self.field_map.get(logical_name)
-        return issue.get('fields', {}).get(field_id) if field_id else None
+        return issue.get('fields', {}).get(field_id) if isinstance(field_id, str) and field_id else None
 
     def _field_evidence(self, issue: dict, logical_name: str) -> str:
         return flatten_text(self._field(issue, logical_name))
+
+    def _story_points_raw(self, issue: dict) -> tuple[Any, str]:
+        fields = issue.get('fields', {}) or {}
+        zero_candidate: tuple[Any, str] | None = None
+        non_numeric_candidate: tuple[Any, str] | None = None
+        for field_id in self.story_point_field_ids:
+            if field_id not in fields:
+                continue
+            raw = fields.get(field_id)
+            number = self._number(raw)
+            if number is not None:
+                if number > 0:
+                    return raw, field_id
+                if zero_candidate is None:
+                    zero_candidate = (raw, field_id)
+            elif flatten_text(raw):
+                if non_numeric_candidate is None:
+                    non_numeric_candidate = (raw, field_id)
+        return zero_candidate or non_numeric_candidate or (None, '')
+
+    def _story_points_value(self, issue: dict) -> float:
+        """Extract the Story Points value from the mapped or discovered fields.
+
+        Jira implementations differ: some store story points only on Stories,
+        while others allow sizing at Epic or Initiative level. The roll-up keeps
+        the issue's own value separate from descendant totals so there is no
+        ambiguity in the dashboard and exports.
+        """
+        raw, _field_id = self._story_points_raw(issue)
+        number = self._number(raw)
+        return float(number or 0.0)
 
     def _text_requirement(self, issue: dict, logical_name: str, label: str, headings: list[str]) -> CheckResult:
         evidence = self._field_evidence(issue, logical_name)
@@ -359,17 +418,14 @@ class ComplianceEngine:
                 key='story_estimation', label='Story estimation / sizing', passed=True,
                 evidence='Only applicable to Story-level work items.', remediation='', applicable=False
             )
-        raw = self._field(issue, 'story_points')
+        raw, story_points_field_id = self._story_points_raw(issue)
         original_estimate = ((issue.get('fields', {}).get('timetracking') or {}).get('originalEstimateSeconds'))
-        points_text = flatten_text(raw)
-        numeric_points = 0.0
-        try:
-            numeric_points = float(points_text) if points_text else 0.0
-        except ValueError:
-            numeric_points = 1.0 if points_text else 0.0
+        numeric_points = self._number(raw) or 0.0
         passed = numeric_points > 0 or (original_estimate or 0) > 0
-        evidence = f'Story points: {points_text}' if numeric_points > 0 else (
-            f'Original estimate: {original_estimate} seconds' if original_estimate else 'No story points or original estimate found'
+        evidence = (
+            f'Story points: {_point_value(numeric_points)} from {story_points_field_id}' if numeric_points > 0 else (
+                f'Original estimate: {original_estimate} seconds' if original_estimate else 'No story points or original estimate found'
+            )
         )
         return CheckResult(
             key='story_estimation', label='Story estimation / sizing', passed=passed,
@@ -492,12 +548,19 @@ class ComplianceEngine:
         passed_count = sum(1 for c in applicable if c.passed)
         passed = passed_count == applicable_count
         score = round((passed_count / applicable_count * 100), 1) if applicable_count else 100.0
+        own_story_points = self._story_points_value(issue)
         return {
             'key': issue.get('key'),
             'summary': flatten_text(issue.get('fields', {}).get('summary')),
             'issue_type': issue_type_name.title() or 'Unknown',
             'status': flatten_text((issue.get('fields', {}).get('status') or {}).get('name')),
             'assignee': flatten_text(issue.get('fields', {}).get('assignee')),
+            'story_points': _point_value(own_story_points),
+            'own_story_points': _point_value(own_story_points),
+            'story_points_from_epics': 0,
+            'story_points_from_stories': 0,
+            'rolled_story_points': _point_value(own_story_points),
+            'total_story_points': _point_value(own_story_points),
             'passed': passed,
             'score': score,
             'passed_count': passed_count,
@@ -514,8 +577,21 @@ class ComplianceEngine:
             er = self.evaluate_issue(epic, 'epic')
             children = stories_by_epic.get(epic.get('key'), [])
             er['stories'] = [self.evaluate_issue(s, 'story') for s in children]
+            child_story_points = sum(float(story.get('story_points') or 0) for story in er['stories'])
+            er['story_points_from_stories'] = _point_value(child_story_points)
+            er['rolled_story_points'] = _point_value(float(er.get('story_points') or 0) + child_story_points)
+            er['total_story_points'] = er['rolled_story_points']
             epic_results.append(er)
             story_results.extend(er['stories'])
+
+        initiative_own_story_points = float(initiative_result.get('story_points') or 0)
+        epic_own_story_points = sum(float(epic.get('story_points') or 0) for epic in epic_results)
+        story_own_story_points = sum(float(story.get('story_points') or 0) for story in story_results)
+        rolled_story_points = initiative_own_story_points + epic_own_story_points + story_own_story_points
+        initiative_result['story_points_from_epics'] = _point_value(epic_own_story_points)
+        initiative_result['story_points_from_stories'] = _point_value(story_own_story_points)
+        initiative_result['rolled_story_points'] = _point_value(rolled_story_points)
+        initiative_result['total_story_points'] = _point_value(rolled_story_points)
 
         structural_checks = [
             self._apply_exclusion(CheckResult(
@@ -559,6 +635,11 @@ class ComplianceEngine:
             'epic_count': len(epic_results),
             'story_count': len(story_results),
             'all_items_count': len(all_items),
+            'initiative_story_points': _point_value(initiative_own_story_points),
+            'epic_story_points': _point_value(epic_own_story_points),
+            'story_story_points': _point_value(story_own_story_points),
+            'story_points_total': _point_value(rolled_story_points),
+            'rolled_story_points': _point_value(rolled_story_points),
             'excluded_criteria': sorted(self.excluded_criteria),
         }
         canonical = json.dumps(result, sort_keys=True, separators=(',', ':'))

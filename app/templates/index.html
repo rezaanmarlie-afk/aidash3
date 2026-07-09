@@ -68,23 +68,26 @@
 </section>
 {% endif %}
 
-<section class="kpi-grid six">
+<section class="kpi-grid eight">
   <div class="kpi"><span>Top-level tickets</span><strong>{{ scan.summary.initiatives }}</strong></div>
   <div class="kpi good"><span>Hierarchy ready</span><strong>{{ scan.summary.compliant }}</strong></div>
   <div class="kpi bad"><span>Blocked</span><strong>{{ scan.summary.blocked }}</strong></div>
   <div class="kpi"><span>Current approvals</span><strong>{{ scan.summary.approved }}</strong></div>
   <div class="kpi"><span>Ticket compliance</span><strong>{{ scan.summary.ticket_score }}%</strong></div>
   <div class="kpi"><span>Hierarchy compliance</span><strong>{{ scan.summary.hierarchy_score }}%</strong></div>
+  <div class="kpi"><span>Rolled-up story points</span><strong>{{ scan.summary.story_points_total|round(2) }}</strong></div>
+  <div class="kpi"><span>Story-level points</span><strong>{{ scan.summary.story_story_points|round(2) }}</strong></div>
 </section>
 
 <section class="panel query-panel">
   <div class="eyebrow">How the percentages work</div>
-  <p class="muted"><strong>Ticket compliance</strong> measures only the selected top-level Jira ticket. <strong>Hierarchy compliance</strong> measures that ticket, all linked Epics and Stories, plus the hierarchy controls. Manager approval remains locked until the full hierarchy is compliant.</p>
+  <p class="muted"><strong>Ticket compliance</strong> measures only the selected top-level Jira ticket. <strong>Hierarchy compliance</strong> measures that ticket, all linked Epics and Stories, plus the hierarchy controls. <strong>Rolled-up story points</strong> totals the mapped Story Points field across the parent ticket, linked Epics and linked Stories; it is informational and does not change compliance scoring. Manager approval remains locked until the full hierarchy is compliant.</p>
 </section>
 
 <section class="panel query-panel">
   <div class="eyebrow">Scan diagnostics</div>
   <p class="muted">Completed in {{ scan.diagnostics.elapsed_seconds }} seconds using {{ scan.diagnostics.jira_requests }} Jira API request(s). Base query returned {{ scan.diagnostics.base_matches }} item(s).{% if scan.diagnostics.issue_type_filter_enabled %} The optional issue-type filter skipped {{ scan.diagnostics.non_initiative_matches_skipped }} item(s).{% else %} No issue-type filter was applied.{% endif %} Loaded {{ scan.diagnostics.epics_loaded }} Epics and {{ scan.diagnostics.stories_loaded }} Stories{% if scan.diagnostics.cache_hit %} from the recent scan cache{% endif %}. Jira issue types returned: {{ scan.diagnostics.issue_types_returned|join(', ') }}.</p>
+  <p class="muted"><strong>Story point fields requested:</strong> {% if scan.diagnostics.story_point_fields_requested %}{{ scan.diagnostics.story_point_fields_requested|join(', ') }}{% else %}None detected. Open Settings and map the Jira Story Points / sizing field.{% endif %}</p>
 </section>
 
 <section class="panel">
@@ -94,12 +97,13 @@
   {% if scan.results %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Top-level ticket</th><th>Hierarchy</th><th>Ticket compliance</th><th>Full hierarchy</th><th>Failures</th><th>Manager Sign-Off</th><th></th></tr></thead>
+      <thead><tr><th>Top-level ticket</th><th>Hierarchy</th><th>Story points roll-up</th><th>Ticket compliance</th><th>Full hierarchy</th><th>Failures</th><th>Manager Sign-Off</th><th></th></tr></thead>
       <tbody>
       {% for row in scan.results %}
         <tr>
           <td><strong>{{ row.initiative.key }}</strong><br><span class="muted">{{ row.initiative.summary }}</span><br><span class="tiny">{{ row.initiative.issue_type }}</span></td>
           <td>{{ row.epic_count }} Epics<br>{{ row.story_count }} Stories</td>
+          <td><strong>{{ row.story_points_total }}</strong><br><span class="tiny">Top: {{ row.initiative_story_points }} · Epics: {{ row.epic_story_points }} · Stories: {{ row.story_story_points }}</span></td>
           <td>
             <div class="score-line"><span class="score-bar"><i style="width: {{ row.ticket_score }}%"></i></span><strong>{{ row.ticket_score }}%</strong></div>
             <span class="pill {{ 'pass' if row.ticket_compliant else 'fail' }}">{{ 'Compliant' if row.ticket_compliant else row.ticket_failure_count ~ ' ticket failure(s)' }}</span>

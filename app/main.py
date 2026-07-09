@@ -93,6 +93,44 @@ def criteria_label_map() -> dict[str, str]:
     return {item['key']: item['label'] for item in all_criteria_options()}
 
 
+def _norm_field_label(value: str) -> str:
+    return ''.join(ch for ch in str(value or '').casefold() if ch.isalnum())
+
+
+def story_point_field_candidates(fields: list[dict[str, Any]], mapping: dict[str, str]) -> list[str]:
+    """Discover all likely Story Points custom fields exposed by Jira.
+
+    Jira estates frequently have duplicate Story Points fields, especially where
+    company-managed and team-managed projects coexist. The saved mapping is
+    kept first, but the scan also requests likely alternatives so the roll-up
+    can use the field that is actually populated on NMGOS tickets.
+    """
+    candidates: list[str] = []
+    mapped = mapping.get('story_points')
+    if mapped:
+        candidates.append(mapped)
+
+    strong_exact = {
+        'storypoints', 'storypoint', 'storypointestimate', 'storypointsestimate',
+        'storyestimate', 'estimationpoints', 'sizepoints', 'sizingpoints',
+    }
+    for field in fields:
+        field_id = str(field.get('id') or '').strip()
+        if not field_id:
+            continue
+        labels = [str(field.get('name') or '')]
+        labels.extend(str(clause or '') for clause in field.get('clauseNames') or [])
+        normalised = {_norm_field_label(label) for label in labels if label}
+        text = ' '.join(labels).casefold()
+        if (
+            normalised & strong_exact
+            or ('story' in text and ('point' in text or 'estimate' in text or 'estim' in text or 'sizing' in text or 'size' in text))
+        ):
+            candidates.append(field_id)
+
+    return list(dict.fromkeys(candidates))
+
+
 @app.middleware('http')
 async def expose_build_and_disable_stale_browser_cache(request: Request, call_next):
     response = await call_next(request)
@@ -221,9 +259,15 @@ def field_config() -> dict[str, Any]:
 
     parent_link_field = jira.resolve_field(['Parent Link'])
     epic_link_field = jira.resolve_field(['Epic Link'])
+    story_point_ids = story_point_field_candidates(fields, mapping)
 
     return {
         'mapping': mapping,
+        'story_point_field_ids': story_point_ids,
+        'story_point_field_names': [
+            f"{(by_id.get(field_id) or {}).get('name', field_id)} ({field_id})"
+            for field_id in story_point_ids
+        ],
         'pi_field': pi_field,
         'sm_field': sm_field,
         'parent_link_field': parent_link_field,
@@ -295,6 +339,7 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
         'summary', 'issuetype', 'status', 'assignee', 'description',
         'issuelinks', 'timetracking', 'parent',
         *cfg['mapping'].values(),
+        *cfg.get('story_point_field_ids', []),
         *[criterion['field_id'] for criterion in cfg.get('additional_criteria', []) if criterion.get('field_id')],
         *[field_id for field_id in relation_ids if field_id],
     ]))
@@ -321,8 +366,10 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
         max_results=settings.jira_scan_max_results,
     )
 
+    engine_mapping = dict(cfg['mapping'])
+    engine_mapping['story_points_candidates'] = cfg.get('story_point_field_ids', [])
     engine = ComplianceEngine(
-        cfg['mapping'], cfg['internal_projects'], cfg['allow_description_fallback'],
+        engine_mapping, cfg['internal_projects'], cfg['allow_description_fallback'],
         excluded_criteria=set(filters.get('excluded_criteria') or []),
         additional_criteria=cfg.get('additional_criteria', []),
     )
@@ -365,6 +412,10 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
             'score': round(
                 sum(result['hierarchy_score'] for result in results) / len(results), 1
             ) if results else 0,
+            'story_points_total': sum(float(result.get('story_points_total') or 0) for result in results),
+            'initiative_story_points': sum(float(result.get('initiative_story_points') or 0) for result in results),
+            'epic_story_points': sum(float(result.get('epic_story_points') or 0) for result in results),
+            'story_story_points': sum(float(result.get('story_story_points') or 0) for result in results),
         },
         'diagnostics': {
             'elapsed_seconds': round(monotonic() - started, 2),
@@ -377,6 +428,7 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
             }),
             'epics_loaded': hierarchy_stats['epics_loaded'],
             'stories_loaded': hierarchy_stats['stories_loaded'],
+            'story_point_fields_requested': cfg.get('story_point_field_names', []),
             'cache_hit': False,
         },
         'config': cfg,
@@ -718,7 +770,8 @@ def _summary_export_rows(scan: dict[str, Any], filters: dict[str, Any]) -> list[
         'PI', 'Scrum Master', 'Top-Level Ticket', 'Issue Type', 'Summary',
         'Top-Level Ticket Compliance %', 'Top-Level Ticket Compliant',
         'Full Hierarchy Compliance %', 'Full Hierarchy Ready',
-        'Epic Count', 'Story Count', 'Top-Level Failures', 'Hierarchy Failures',
+        'Epic Count', 'Story Count', 'Top-Level Story Points', 'Epic Story Points',
+        'Story Story Points', 'Rolled-Up Story Points', 'Top-Level Failures', 'Hierarchy Failures',
         'Excluded Criteria', 'Latest Sign-Off', 'Sign-Off Current', 'JQL'
     ]]
     for result in scan['results']:
@@ -729,6 +782,8 @@ def _summary_export_rows(scan: dict[str, Any], filters: dict[str, Any]) -> list[
             result['initiative']['summary'], result['ticket_score'],
             'Yes' if result['ticket_compliant'] else 'No', result['hierarchy_score'],
             'Yes' if result['compliant'] else 'No', result['epic_count'], result['story_count'],
+            result.get('initiative_story_points', 0), result.get('epic_story_points', 0),
+            result.get('story_story_points', 0), result.get('story_points_total', 0),
             result['ticket_failure_count'], result['failure_count'],
             ', '.join(criteria_label_map().get(key, key) for key in filters.get('excluded_criteria') or []) or 'None',
             signoff.get('decision', ''),
@@ -744,7 +799,8 @@ def _detailed_export_rows(
         'PI', 'Scrum Master', 'Root Ticket', 'Root Summary',
         'Root Ticket Compliance %', 'Full Hierarchy Compliance %', 'Full Hierarchy Ready',
         'Hierarchy Level', 'Parent Ticket', 'Issue Key', 'Issue Type', 'Issue Summary',
-        'Status', 'Assignee', 'Issue Compliance %', 'Issue Compliant',
+        'Status', 'Assignee', 'Issue Story Points', 'Issue Rolled-Up Story Points',
+        'Root Rolled-Up Story Points', 'Issue Compliance %', 'Issue Compliant',
         'Criterion', 'Applicable', 'Excluded', 'Criterion Result', 'Evidence', 'Remediation',
         'Latest Sign-Off', 'Sign-Off Current', 'JQL'
     ]]
@@ -766,7 +822,9 @@ def _detailed_export_rows(
             for check in item['checks']:
                 rows.append(common + [
                     level, parent_key, item['key'], item['issue_type'], item['summary'],
-                    item['status'], item['assignee'], item['score'],
+                    item['status'], item['assignee'], item.get('story_points', 0),
+                    item.get('rolled_story_points', item.get('story_points', 0)),
+                    result.get('story_points_total', 0), item['score'],
                     'Yes' if item['passed'] else 'No', check['label'],
                     'Yes' if check['applicable'] else 'No',
                     'Yes' if check.get('excluded') else 'No',
@@ -786,7 +844,9 @@ def _detailed_export_rows(
         for check in result['structural_checks']:
             rows.append(common + [
                 'Hierarchy control', root['key'], root['key'], root['issue_type'], root['summary'],
-                root['status'], root['assignee'], result['hierarchy_score'],
+                root['status'], root['assignee'], root.get('story_points', 0),
+                root.get('rolled_story_points', result.get('story_points_total', 0)),
+                result.get('story_points_total', 0), result['hierarchy_score'],
                 'Yes' if result['compliant'] else 'No', check['label'],
                 'Yes' if check['applicable'] else 'No', 'Yes' if check.get('excluded') else 'No',
                 'Excluded' if check.get('excluded') else ('Pass' if check['passed'] else 'Fail'),
