@@ -81,7 +81,8 @@
 
 <section class="panel query-panel">
   <div class="eyebrow">How the percentages work</div>
-  <p class="muted"><strong>Ticket compliance</strong> measures only the selected top-level Jira ticket. <strong>Hierarchy compliance</strong> measures that ticket, all linked Epics and Stories, plus the hierarchy controls. <strong>Rolled-up story points</strong> totals the mapped Story Points field across the parent ticket, linked Epics, linked Stories and any additional descendant delivery work found through Jira parent/Epic hierarchy or hierarchy-like links; it is informational and does not change compliance scoring. Manager approval remains locked until the full hierarchy is compliant.</p>
+  <p class="muted"><strong>Ticket compliance</strong> measures only the selected top-level Jira ticket. <strong>Hierarchy compliance</strong> measures that ticket, all linked Epics and Stories, plus the hierarchy controls. <strong>Rolled-up story points</strong> totals the mapped Story Points field across the parent ticket, linked Epics, linked Stories and any additional descendant delivery work found through Jira parent/Epic hierarchy or hierarchy-like links; it is informational and does not change compliance scoring. <strong>Initiative size</strong> is derived from the final rolled-up Story Points total using the thresholds configured in Settings. Manager approval remains locked until the full hierarchy is compliant.</p>
+  {% if scan.summary.initiative_size_distribution %}<p class="muted"><strong>Size distribution:</strong> {% for code, count in scan.summary.initiative_size_distribution.items() if count %}{{ code }}={{ count }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
 </section>
 
 <section class="panel query-panel">
@@ -98,13 +99,14 @@
   {% if scan.results %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Top-level ticket</th><th>Hierarchy</th><th>Story points roll-up</th><th>Ticket compliance</th><th>Full hierarchy</th><th>Failures</th><th>Manager Sign-Off</th><th></th></tr></thead>
+      <thead><tr><th>Top-level ticket</th><th>Hierarchy</th><th>Story points roll-up</th><th>Initiative size</th><th>Ticket compliance</th><th>Full hierarchy</th><th>Failures</th><th>Manager Sign-Off</th><th></th></tr></thead>
       <tbody>
       {% for row in scan.results %}
         <tr>
           <td><strong>{{ row.initiative.key }}</strong><br><span class="muted">{{ row.initiative.summary }}</span><br><span class="tiny">{{ row.initiative.issue_type }}</span></td>
           <td>{{ row.epic_count }} Epics<br>{{ row.story_count }} Stories</td>
           <td><strong>{{ row.story_points_total }}</strong><br><span class="tiny">Top: {{ row.initiative_story_points }} · Epics: {{ row.epic_story_points }} · Stories: {{ row.story_story_points }}{% if row.direct_story_count %} · Direct stories: {{ row.direct_story_points }}{% endif %}{% if row.additional_descendant_count %} · Other descendants: {{ row.additional_descendant_story_points }}{% endif %}</span></td>
+          <td><span class="pill size-pill">{{ row.initiative_size_code }}</span><br><span class="tiny">{{ row.initiative_size_basis }}</span></td>
           <td>
             <div class="score-line"><span class="score-bar"><i style="width: {{ row.ticket_score }}%"></i></span><strong>{{ row.ticket_score }}%</strong></div>
             <span class="pill {{ 'pass' if row.ticket_compliant else 'fail' }}">{{ 'Compliant' if row.ticket_compliant else row.ticket_failure_count ~ ' ticket failure(s)' }}</span>

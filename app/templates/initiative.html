@@ -12,7 +12,7 @@
   <div>
     <div class="eyebrow">{{ filters.pi_value }} · {{ filters.priority }}</div>
     <h1>{{ result.initiative.key }} — {{ result.initiative.summary }}</h1>
-    <p>{{ result.initiative.issue_type }} · {{ result.epic_count }} Epics · {{ result.story_count }} Stories · {{ result.story_points_total }} rolled-up story points · Snapshot {{ result.snapshot_hash[:12] }}</p>
+    <p>{{ result.initiative.issue_type }} · {{ result.epic_count }} Epics · {{ result.story_count }} Stories · {{ result.story_points_total }} rolled-up story points · Size {{ result.initiative_size_code }} · Snapshot {{ result.snapshot_hash[:12] }}</p>
   </div>
   <div class="readiness-pair">
     <div class="readiness-orb {{ 'good' if result.ticket_compliant else 'bad' }}"><strong>{{ result.ticket_score }}%</strong><span>Ticket compliance</span></div>
@@ -38,6 +38,7 @@
   <div class="eyebrow">Story point roll-up</div>
   <p class="muted">This totals the mapped Jira Story Points / sizing field from the parent ticket, linked Epics, Stories under Epics, Stories linked directly to the top-level ticket, and additional descendant delivery work found through Jira parent/Epic hierarchy or hierarchy-like links. It is informational and does not change compliance scoring.</p>
   <div class="story-point-breakdown">
+    <div class="story-point-box highlight-size"><span>Initiative size</span><strong>{{ result.initiative_size_code }}</strong><small>{{ result.initiative_size_basis }}</small></div>
     <div class="story-point-box"><span>Top-level ticket points</span><strong>{{ result.initiative_story_points }}</strong></div>
     <div class="story-point-box"><span>Epic points</span><strong>{{ result.epic_story_points }}</strong></div>
     <div class="story-point-box"><span>Story points</span><strong>{{ result.story_story_points }}</strong></div>

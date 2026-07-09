@@ -171,3 +171,11 @@ button:disabled { opacity: .7; cursor: wait; }
   font-weight: 700;
   color: #333;
 }
+
+/* v1.15 - initiative sizing from rolled-up story points */
+.pill.size-pill { background: #111; color: #fff; font-weight: 900; letter-spacing: .03em; }
+.story-point-breakdown .highlight-size { background: #111; color: #fff; border-color: #111; }
+.story-point-breakdown .highlight-size span, .story-point-breakdown .highlight-size small { color: rgba(255,255,255,.78); }
+.story-point-breakdown .highlight-size strong { color: #fff; }
+.story-point-breakdown small { display: block; margin-top: 4px; font-size: 11px; line-height: 1.35; }
+.initiative-sizing-panel table input { max-width: 220px; }

@@ -222,9 +222,10 @@ def build_summary_pdf(scan: dict[str, Any], filters: dict[str, Any], version: st
         ('Avg ticket compliance', f"{summary.get('ticket_score', 0)}%"),
         ('Avg hierarchy compliance', f"{summary.get('hierarchy_score', 0)}%"),
         ('Rolled-up SP', summary.get('story_points_total', 0)),
+        ('Size bands', ', '.join(f'{k}={v}' for k, v in (summary.get('initiative_size_distribution') or {}).items() if v) or 'None'),
     ]
     kpi_data = [[_p(label, styles['tiny']) for label, _ in kpis], [_p(value, styles['h1']) for _, value in kpis]]
-    kpi_table = Table(kpi_data, colWidths=[doc.width / 7.0] * 7)
+    kpi_table = Table(kpi_data, colWidths=[doc.width / 8.0] * 8)
     kpi_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), LIGHT), ('BOX', (0, 0), (-1, -1), 0.5, LINE),
         ('INNERGRID', (0, 0), (-1, -1), 0.35, LINE), ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -233,7 +234,7 @@ def build_summary_pdf(scan: dict[str, Any], filters: dict[str, Any], version: st
     ]))
     story.extend([kpi_table, Spacer(1, 5 * mm), _p('Portfolio results', styles['h1'])])
 
-    headers = ['Ticket', 'Summary', 'Type', 'Epics', 'Stories', 'SP Roll-up', 'Ticket %', 'Hierarchy %', 'Failures', 'Sign-Off']
+    headers = ['Ticket', 'Summary', 'Type', 'Epics', 'Stories', 'SP Roll-up', 'Size', 'Ticket %', 'Hierarchy %', 'Failures', 'Sign-Off']
     rows: list[list[Any]] = [[_p(h, styles['header']) for h in headers]]
     for result in scan.get('results', []):
         root = result['initiative']
@@ -245,11 +246,12 @@ def build_summary_pdf(scan: dict[str, Any], filters: dict[str, Any], version: st
             _p(root.get('key'), styles['small']), _p(root.get('summary'), styles['small']),
             _p(root.get('issue_type'), styles['small']), _p(result.get('epic_count'), styles['center']),
             _p(result.get('story_count'), styles['center']), _p(result.get('story_points_total', 0), styles['center']),
+            _p(result.get('initiative_size_code', ''), styles['center']),
             _p(f"{result.get('ticket_score', 0)}%", styles['center']),
             _p(f"{result.get('hierarchy_score', 0)}%", styles['center']), _p(result.get('failure_count'), styles['center']),
             _p(signoff_text, styles['small']),
         ])
-    col_widths = [23 * mm, 62 * mm, 22 * mm, 12 * mm, 12 * mm, 19 * mm, 18 * mm, 22 * mm, 15 * mm, 30 * mm]
+    col_widths = [22 * mm, 55 * mm, 20 * mm, 11 * mm, 11 * mm, 17 * mm, 14 * mm, 17 * mm, 20 * mm, 14 * mm, 27 * mm]
     table = Table(rows, colWidths=col_widths, repeatRows=1, hAlign='LEFT')
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), DARK), ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -342,6 +344,7 @@ def build_detail_pdf(
                 f"Epics: {result.get('epic_count', 0)} | Stories: {result.get('story_count', 0)} | "
                 f"Story points roll-up: {result.get('story_points_total', 0)} "
                 f"(Top: {result.get('initiative_story_points', 0)}, Epics: {result.get('epic_story_points', 0)}, Stories: {result.get('story_story_points', 0)}, Direct stories: {result.get('direct_story_points', 0)}, Other descendants: {result.get('additional_descendant_story_points', 0)}) | "
+                f"Initiative size: {result.get('initiative_size_code', '')} - {result.get('initiative_size_basis', '')} | "
                 f"Failures: {result.get('failure_count', 0)} | Sign-Off: {signoff_text}",
                 styles['body'],
             ),

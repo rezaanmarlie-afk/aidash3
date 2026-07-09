@@ -55,6 +55,87 @@ CUSTOM_RULE_OPTIONS = [
 VALID_CUSTOM_RULES = {item['key'] for item in CUSTOM_RULE_OPTIONS}
 VALID_APPLIES_TO = {'all', 'top_level', 'epic', 'story'}
 
+DEFAULT_INITIATIVE_SIZE_THRESHOLDS = [
+    {'code': 'XS', 'label': 'Extra Small', 'max_points': 20},
+    {'code': 'S', 'label': 'Small', 'max_points': 50},
+    {'code': 'M', 'label': 'Medium', 'max_points': 100},
+    {'code': 'L', 'label': 'Large', 'max_points': 200},
+    {'code': 'XL', 'label': 'Extra Large', 'max_points': 400},
+]
+OVERFLOW_INITIATIVE_SIZE = {'code': 'XXL', 'label': 'Extra Extra Large', 'max_points': None}
+
+
+def initiative_size_thresholds() -> list[dict[str, Any]]:
+    raw = db.get_setting('initiative_size_thresholds', DEFAULT_INITIATIVE_SIZE_THRESHOLDS)
+    if not isinstance(raw, list):
+        raw = DEFAULT_INITIATIVE_SIZE_THRESHOLDS
+    thresholds: list[dict[str, Any]] = []
+    fallback = {item['code']: item for item in DEFAULT_INITIATIVE_SIZE_THRESHOLDS}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get('code') or '').strip().upper()
+        if code not in fallback:
+            continue
+        try:
+            max_points = float(item.get('max_points'))
+        except (TypeError, ValueError):
+            max_points = float(fallback[code]['max_points'])
+        if max_points <= 0:
+            max_points = float(fallback[code]['max_points'])
+        thresholds.append({
+            'code': code,
+            'label': str(item.get('label') or fallback[code]['label']),
+            'max_points': _point_value(max_points),
+        })
+    if not thresholds:
+        thresholds = [dict(item) for item in DEFAULT_INITIATIVE_SIZE_THRESHOLDS]
+    # Ensure the bands are ordered by the numeric max even when a setting was
+    # edited manually in the database. Later settings save enforces monotonicity.
+    return sorted(thresholds, key=lambda item: float(item.get('max_points') or 0))
+
+
+def classify_initiative_size(points: float | int | str | None, thresholds: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    total = float(points or 0)
+    if total <= 0:
+        return {
+            'code': 'Unestimated',
+            'label': 'Unestimated',
+            'max_points': 0,
+            'basis': 'No rolled-up story points found',
+        }
+    active_thresholds = thresholds or initiative_size_thresholds()
+    previous_max = 0.0
+    for band in active_thresholds:
+        max_points = float(band.get('max_points') or 0)
+        if total <= max_points:
+            min_display = _point_value(previous_max + 0.01) if previous_max else 1
+            return {
+                'code': band['code'],
+                'label': band.get('label') or band['code'],
+                'max_points': _point_value(max_points),
+                'basis': f'{_point_value(total)} rolled-up SP falls in {min_display}-{_point_value(max_points)} SP',
+            }
+        previous_max = max_points
+    return {
+        'code': OVERFLOW_INITIATIVE_SIZE['code'],
+        'label': OVERFLOW_INITIATIVE_SIZE['label'],
+        'max_points': None,
+        'basis': f'{_point_value(total)} rolled-up SP is above {_point_value(previous_max)} SP',
+    }
+
+
+def apply_initiative_size(result: dict[str, Any], thresholds: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    size = classify_initiative_size(result.get('story_points_total', 0), thresholds)
+    result['initiative_size'] = size
+    result['initiative_size_code'] = size['code']
+    result['initiative_size_label'] = size['label']
+    result['initiative_size_basis'] = size['basis']
+    if 'initiative' in result and isinstance(result['initiative'], dict):
+        result['initiative']['initiative_size'] = size
+        result['initiative']['initiative_size_code'] = size['code']
+    return result
+
 
 def stored_additional_criteria() -> list[dict[str, Any]]:
     raw = db.get_setting('additional_criteria', [])
@@ -282,6 +363,7 @@ def field_config() -> dict[str, Any]:
         'initiative_issue_type': db.get_setting('initiative_issue_type', 'Initiative'),
         'restrict_initiative_type': db.get_setting('restrict_initiative_type', False),
         'additional_criteria': additional_criteria,
+        'initiative_size_thresholds': initiative_size_thresholds(),
     }
 
 
@@ -469,6 +551,7 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
         excluded_criteria=set(filters.get('excluded_criteria') or []),
         additional_criteria=cfg.get('additional_criteria', []),
     )
+    size_thresholds = cfg.get('initiative_size_thresholds') or initiative_size_thresholds()
     results = []
     for initiative in initiatives:
         epics = epics_by_initiative.get(initiative['key'], [])
@@ -483,6 +566,7 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
             descendants_by_initiative.get(initiative['key'], []),
             engine,
         )
+        result = apply_initiative_size(result, size_thresholds)
         latest = db.latest_signoff(initiative['key'], filters['pi_value'], filters['scrum_master_id'])
         if latest:
             latest['is_current'] = latest['snapshot_hash'] == result['snapshot_hash']
@@ -522,6 +606,10 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
             'nested_story_points': sum(float(result.get('nested_story_points') or 0) for result in results),
             'additional_descendant_story_points': sum(float(result.get('additional_descendant_story_points') or 0) for result in results),
             'additional_descendant_count': sum(int(result.get('additional_descendant_count') or 0) for result in results),
+            'initiative_size_distribution': {
+                code: sum(1 for result in results if result.get('initiative_size_code') == code)
+                for code in ['Unestimated', *[band['code'] for band in size_thresholds], OVERFLOW_INITIATIVE_SIZE['code']]
+            },
         },
         'diagnostics': {
             'elapsed_seconds': round(monotonic() - started, 2),
@@ -752,6 +840,7 @@ def settings_page(request: Request):
             'pi_clause': 'PI Priority (ASOC)',
             'sm_clause': 'Scrum Master[User Picker (single user)]',
             'field_project': field_project, 'project_field_source': '', 'project_field_warning': '',
+            'initiative_size_thresholds': initiative_size_thresholds(),
         }
         error = str(exc)
     return render(request, 'settings.html', {
@@ -768,6 +857,7 @@ def save_settings(
     dod: str = Form(''),
     acceptance_criteria: str = Form(''),
     dependencies: str = Form(''),
+    business_impact: str = Form(''),
     story_points: str = Form(''),
     squad: str = Form(''),
     internal_projects: str = Form(''),
@@ -781,6 +871,9 @@ def save_settings(
     custom_rule: list[str] = Form(default=[]),
     custom_expected: list[str] = Form(default=[]),
     custom_applies_to: list[str] = Form(default=[]),
+    size_code: list[str] = Form(default=[]),
+    size_label: list[str] = Form(default=[]),
+    size_max_points: list[str] = Form(default=[]),
     restrict_initiative_type: str | None = Form(None),
     allow_description_fallback: str | None = Form(None),
     csrf: str = Form(...),
@@ -790,7 +883,7 @@ def save_settings(
     for key, value in {
         'pi_priority': pi_priority, 'scrum_master': scrum_master, 'dor': dor, 'dod': dod,
         'acceptance_criteria': acceptance_criteria, 'dependencies': dependencies,
-        'story_points': story_points, 'squad': squad,
+        'business_impact': business_impact, 'story_points': story_points, 'squad': squad,
     }.items():
         if value:
             db.set_setting(f'field.{key}', value)
@@ -832,6 +925,27 @@ def save_settings(
             'applies_to': applies_to if applies_to in VALID_APPLIES_TO else 'all',
         })
     db.set_setting('additional_criteria', additional)
+
+    thresholds: list[dict[str, Any]] = []
+    previous = 0.0
+    fallback = {item['code']: item for item in DEFAULT_INITIATIVE_SIZE_THRESHOLDS}
+    for index, default_band in enumerate(DEFAULT_INITIATIVE_SIZE_THRESHOLDS):
+        code = size_code[index].strip().upper() if index < len(size_code) and size_code[index].strip() else default_band['code']
+        if code not in fallback:
+            code = default_band['code']
+        label = size_label[index].strip() if index < len(size_label) and size_label[index].strip() else fallback[code]['label']
+        raw_max = size_max_points[index].strip() if index < len(size_max_points) else ''
+        try:
+            max_points = float(raw_max)
+        except (TypeError, ValueError):
+            max_points = float(fallback[code]['max_points'])
+        # Keep the bands strictly increasing so every point total maps to one
+        # unambiguous initiative size.
+        if max_points <= previous:
+            max_points = previous + 1
+        previous = max_points
+        thresholds.append({'code': code, 'label': label, 'max_points': _point_value(max_points)})
+    db.set_setting('initiative_size_thresholds', thresholds)
 
     jira.fields(refresh=True)
     clear_scan_cache()
@@ -885,7 +999,8 @@ def _summary_export_rows(scan: dict[str, Any], filters: dict[str, Any]) -> list[
         'Top-Level Ticket Compliance %', 'Top-Level Ticket Compliant',
         'Full Hierarchy Compliance %', 'Full Hierarchy Ready',
         'Epic Count', 'Story Count', 'Direct Story Count', 'Top-Level Story Points', 'Epic Story Points',
-        'Story Story Points', 'Direct Story Points', 'Other Descendant Story Points', 'Rolled-Up Story Points', 'Top-Level Failures', 'Hierarchy Failures',
+        'Story Story Points', 'Direct Story Points', 'Other Descendant Story Points', 'Rolled-Up Story Points',
+        'Initiative Size', 'Initiative Size Basis', 'Top-Level Failures', 'Hierarchy Failures',
         'Excluded Criteria', 'Latest Sign-Off', 'Sign-Off Current', 'JQL'
     ]]
     for result in scan['results']:
@@ -898,6 +1013,7 @@ def _summary_export_rows(scan: dict[str, Any], filters: dict[str, Any]) -> list[
             'Yes' if result['compliant'] else 'No', result['epic_count'], result['story_count'],
             result.get('direct_story_count', 0), result.get('initiative_story_points', 0), result.get('epic_story_points', 0),
             result.get('story_story_points', 0), result.get('direct_story_points', 0), result.get('additional_descendant_story_points', 0), result.get('story_points_total', 0),
+            result.get('initiative_size_code', ''), result.get('initiative_size_basis', ''),
             result['ticket_failure_count'], result['failure_count'],
             ', '.join(criteria_label_map().get(key, key) for key in filters.get('excluded_criteria') or []) or 'None',
             signoff.get('decision', ''),
@@ -916,7 +1032,7 @@ def _detailed_export_rows(
         'Status', 'Assignee', 'Issue Story Points', 'Issue Rolled-Up Story Points',
         'Root Rolled-Up Story Points', 'Issue Compliance %', 'Issue Compliant',
         'Criterion', 'Applicable', 'Excluded', 'Criterion Result', 'Evidence', 'Remediation',
-        'Latest Sign-Off', 'Sign-Off Current', 'JQL'
+        'Latest Sign-Off', 'Sign-Off Current', 'JQL', 'Root Initiative Size', 'Root Initiative Size Basis'
     ]]
 
     selected = [
@@ -947,6 +1063,7 @@ def _detailed_export_rows(
                     ),
                     check['evidence'], check['remediation'], signoff.get('decision', ''),
                     'Yes' if signoff.get('is_current') else ('No' if signoff else ''), scan['jql'],
+                    result.get('initiative_size_code', ''), result.get('initiative_size_basis', ''),
                 ])
 
         add_issue(root, 'Top-level ticket')
@@ -971,6 +1088,7 @@ def _detailed_export_rows(
                 check['evidence'], check['remediation'],
                 signoff.get('decision', ''),
                 'Yes' if signoff.get('is_current') else ('No' if signoff else ''), scan['jql'],
+                result.get('initiative_size_code', ''), result.get('initiative_size_basis', ''),
             ])
     return rows
 

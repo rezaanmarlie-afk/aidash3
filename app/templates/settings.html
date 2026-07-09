@@ -26,6 +26,7 @@
       {{ select_field('dod', 'Definition of Done / DoD / DOD', cfg.mapping.get('dod', '')) }}
       {{ select_field('acceptance_criteria', 'Acceptance Criteria', cfg.mapping.get('acceptance_criteria', '')) }}
       {{ select_field('dependencies', 'Dependencies', cfg.mapping.get('dependencies', '')) }}
+      {{ select_field('business_impact', 'Business Impact dependency fallback', cfg.mapping.get('business_impact', '')) }}
       {{ select_field('story_points', 'Story Points / sizing', cfg.mapping.get('story_points', '')) }}
       {{ select_field('squad', 'Squad field (optional)', cfg.mapping.get('squad', '')) }}
       <label>Initiative issue type<input name="initiative_issue_type" value="{{ cfg.initiative_issue_type }}" required></label>
@@ -33,6 +34,26 @@
       <label class="checkbox full"><input type="checkbox" name="restrict_initiative_type" value="1" {% if cfg.restrict_initiative_type %}checked{% endif %}> Add an Initiative issue-type condition to the root JQL. Leave this off when the Jira query already returns the correct top-level tickets.</label>
       <label class="checkbox full"><input type="checkbox" name="allow_description_fallback" value="1" {% if cfg.allow_description_fallback %}checked{% endif %}> Permit clearly labelled Description sections when no dedicated DoR, DoD or Acceptance Criteria field is populated.</label>
     </div>
+  </section>
+
+  <section class="panel initiative-sizing-panel">
+    <div class="panel-heading"><div><div class="eyebrow">Sizing</div><h2>Initiative sizing from rolled-up story points</h2><p>The app classifies each top-level ticket using the final rolled-up Story Points total. This is informational and does not change compliance scoring.</p></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Size</th><th>Label</th><th>Maximum rolled-up Story Points</th></tr></thead>
+        <tbody>
+          {% for band in cfg.initiative_size_thresholds %}
+          <tr>
+            <td><strong>{{ band.code }}</strong><input type="hidden" name="size_code" value="{{ band.code }}"></td>
+            <td><input name="size_label" value="{{ band.label }}"></td>
+            <td><input name="size_max_points" type="number" min="1" step="1" value="{{ band.max_points }}"></td>
+          </tr>
+          {% endfor %}
+          <tr><td><strong>XXL</strong></td><td>Extra Extra Large</td><td>Above the XL maximum</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Default bands are XS ≤20, S ≤50, M ≤100, L ≤200, XL ≤400, and XXL above 400 rolled-up Story Points. Adjust the thresholds to match your ASOC planning convention.</p>
   </section>
 
   <section class="panel custom-criteria-panel">
@@ -107,5 +128,5 @@
   </section>
 </form>
 
-<section class="panel query-panel"><div class="eyebrow">Dependency rule</div><p>A ticket passes only when dependencies are explicitly declared as none, or a dependency is documented and linked. Story dependencies must link to one of the configured ASOC-internal project keys.</p></section>
+<section class="panel query-panel"><div class="eyebrow">Dependency rule</div><p>A ticket passes when dependencies are explicitly declared as none, including in the mapped Business Impact field, or when a dependency is documented and linked. Story dependencies must link to one of the configured ASOC-internal project keys.</p></section>
 {% endblock %}

@@ -244,6 +244,7 @@ DEFAULT_FIELD_NAMES = {
     'acceptance_criteria': ['Acceptance Criteria', 'Acceptance criteria'],
     'dependencies': ['Dependencies', 'Known Dependencies', 'Known dependencies'],
     'story_points': ['Story Points', 'Story point estimate', 'Story Points Estimate'],
+    'business_impact': ['Business Impact', 'Business impact', 'Business Impact / Value', 'Impact'],
     'squad': ['Squad', 'Delivery Squad', 'ASOC Squad'],
 }
 
@@ -252,6 +253,28 @@ def _point_value(value: float | int | None) -> float | int:
     """Return story point totals without noisy trailing decimals."""
     number = round(float(value or 0), 2)
     return int(number) if number.is_integer() else number
+
+
+def _explicit_no_dependencies(text: str, allow_bare_none: bool = True) -> bool:
+    """Return True when text clearly declares that dependencies do not exist.
+
+    Dedicated dependency fields often contain only "None" or "N/A". Wider
+    narrative fields such as Business Impact must explicitly mention
+    dependencies so that a normal "None" business-impact value is not mistaken
+    for a dependency declaration.
+    """
+    cleaned = normalized(text)
+    if not cleaned:
+        return False
+    if allow_bare_none and cleaned in NONE_PATTERNS:
+        return True
+    patterns = [
+        r'\bno\s+(?:known\s+|external\s+|internal\s+)?dependenc(?:y|ies)\b',
+        r'\bdependenc(?:y|ies)\s*(?:-|–|—|:|=)?\s*(?:none|nil|n/a|na|not applicable)\b',
+        r'\bnone\s*(?:-|–|—|:|=)?\s*(?:known\s+)?dependenc(?:y|ies)\b',
+        r'\bwithout\s+(?:any\s+)?dependenc(?:y|ies)\b',
+    ]
+    return any(re.search(pattern, cleaned, flags=re.IGNORECASE) for pattern in patterns)
 
 class ComplianceEngine:
     def __init__(
@@ -404,8 +427,13 @@ class ComplianceEngine:
                 linked_keys.append(key)
                 linked_projects.add(key.split('-', 1)[0].upper())
 
+        business_impact = self._field_evidence(issue, 'business_impact')
+        if (not normalized(declaration)) and _explicit_no_dependencies(business_impact, allow_bare_none=False):
+            declaration = business_impact
+            declaration_source = 'Business Impact field'
+
         declaration_norm = normalized(declaration)
-        explicitly_none = declaration_norm in NONE_PATTERNS
+        explicitly_none = _explicit_no_dependencies(declaration, allow_bare_none=True)
         has_declaration = bool(declaration_norm)
         has_links = bool(linked_keys)
 
