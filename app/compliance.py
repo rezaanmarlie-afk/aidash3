@@ -262,15 +262,36 @@ def _explicit_no_dependencies(text: str, allow_bare_none: bool = True) -> bool:
     narrative fields such as Business Impact must explicitly mention
     dependencies so that a normal "None" business-impact value is not mistaken
     for a dependency declaration.
+
+    Manager rule: any Business Impact value that contains a clear phrase such as
+    "No dependencies" must pass the Known Dependencies check, even when the
+    same field continues with additional business-impact text. Examples that
+    must pass include "No dependencies and use cases in place",
+    "No dependencies - create", and "There are no known dependencies, but ...".
     """
     cleaned = normalized(text)
     if not cleaned:
         return False
     if allow_bare_none and cleaned in NONE_PATTERNS:
         return True
+
+    # Fast-path the exact manager wording before applying the broader patterns.
+    # This deliberately allows additional text before or after the declaration.
+    compact = re.sub(r'[^a-z0-9]+', ' ', cleaned).strip()
+    explicit_phrases = [
+        'no dependencies', 'no dependency', 'no known dependencies',
+        'no known dependency', 'no dependant', 'no dependants',
+        'no dependancies', 'no dependancy', 'no deps',
+    ]
+    if any(phrase in compact for phrase in explicit_phrases):
+        return True
+
     patterns = [
-        r'\bno\s+(?:known\s+|external\s+|internal\s+)?dependenc(?:y|ies)\b',
-        r'\bdependenc(?:y|ies)\s*(?:-|–|—|:|=)?\s*(?:none|nil|n/a|na|not applicable)\b',
+        r'\bno\s+(?:known\s+|external\s+|internal\s+|business\s+|technical\s+)?dependenc(?:y|ies)\b',
+        r'\bno\s+deps?\b',
+        r'\bno\s+dependanc(?:y|ies)\b',
+        r'\bdependenc(?:y|ies)\s*(?:-|–|—|:|=)?\s*(?:none|nil|n/a|na|not applicable|no)\b',
+        r'\bdependanc(?:y|ies)\s*(?:-|–|—|:|=)?\s*(?:none|nil|n/a|na|not applicable|no)\b',
         r'\bnone\s*(?:-|–|—|:|=)?\s*(?:known\s+)?dependenc(?:y|ies)\b',
         r'\bwithout\s+(?:any\s+)?dependenc(?:y|ies)\b',
     ]
@@ -331,8 +352,100 @@ class ComplianceEngine:
         field_id = self.field_map.get(logical_name)
         return issue.get('fields', {}).get(field_id) if isinstance(field_id, str) and field_id else None
 
+    def _field_text_candidates(self, issue: dict, logical_name: str) -> list[dict[str, str]]:
+        """Return readable values for a logical field from every candidate source.
+
+        Jira estates often contain duplicate project-scoped custom fields. A
+        saved mapping may therefore point at a valid but irrelevant/empty field,
+        while the correct project field is available through the scan candidate
+        list or late issue-metadata enrichment. Business Impact is especially
+        important because managers use values such as "No dependencies and ..."
+        to satisfy the Known Dependencies control.
+        """
+        fields = issue.get('fields', {}) or {}
+        results: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        def add_value(field_id: str, value: Any, source: str = ''):
+            fid = str(field_id or '').strip()
+            if not fid or fid in seen:
+                return
+            seen.add(fid)
+            text = flatten_text(value)
+            if text:
+                results.append({'field_id': fid, 'source': source or fid, 'text': text})
+
+        primary = str(self.field_map.get(logical_name) or '').strip()
+        if primary:
+            add_value(primary, fields.get(primary), primary)
+
+        candidate_key = f'{logical_name}_candidates'
+        candidates = self.field_map.get(candidate_key, [])
+        if isinstance(candidates, str):
+            candidate_ids = [part.strip() for part in candidates.split(',') if part.strip()]
+        elif isinstance(candidates, (list, tuple, set)):
+            candidate_ids = [str(part).strip() for part in candidates if str(part).strip()]
+        else:
+            candidate_ids = []
+        for field_id in candidate_ids:
+            add_value(field_id, fields.get(field_id), field_id)
+
+        # v1.19: late Jira issue-metadata enrichment can attach populated
+        # Business Impact candidates that were not in the global field catalogue
+        # or not selected in Settings. Include them after configured mappings.
+        if logical_name == 'business_impact':
+            for item in issue.get('_business_impact_candidates', []) or []:
+                if not isinstance(item, dict):
+                    continue
+                field_id = str(item.get('field_id') or '').strip()
+                name = str(item.get('name') or field_id).strip()
+                add_value(field_id, item.get('value'), name)
+
+            # v1.20 safety net: some Jira projects expose the Business Impact
+            # field under a workspace-specific custom field that is not named in
+            # the global field catalogue and may not be included in saved
+            # settings. If any returned custom field explicitly contains
+            # "No dependencies" with additional words, include it as a
+            # dependency declaration candidate. This is deliberately restricted
+            # to explicit no-dependency wording; a plain "None" still does
+            # not pass for Business Impact.
+            for field_id, raw in fields.items():
+                fid = str(field_id)
+                if fid in seen or not fid.startswith('customfield_'):
+                    continue
+                text = flatten_text(raw)
+                if _explicit_no_dependencies(text, allow_bare_none=False):
+                    add_value(fid, raw, fid)
+
+        return results
+
     def _field_evidence(self, issue: dict, logical_name: str) -> str:
-        return flatten_text(self._field(issue, logical_name))
+        """Return readable evidence for a logical field.
+
+        For Business Impact, prefer any candidate that explicitly declares no
+        dependencies, even when another duplicate Business Impact field is also
+        populated. This avoids failing Known Dependencies because Jira returned
+        a different duplicate field first.
+        """
+        candidates = self._field_text_candidates(issue, logical_name)
+        if logical_name == 'business_impact':
+            for candidate in candidates:
+                if _explicit_no_dependencies(candidate['text'], allow_bare_none=False):
+                    return candidate['text']
+        return candidates[0]['text'] if candidates else ''
+
+    def _explicit_no_dependency_field_evidence(self, issue: dict) -> tuple[str, str]:
+        """Find an explicit no-dependency declaration in Business Impact.
+
+        Returns (evidence_text, source_name). The source name is used in the
+        detail view and exports so the manager can see why the dependency check
+        passed.
+        """
+        for candidate in self._field_text_candidates(issue, 'business_impact'):
+            text = candidate['text']
+            if _explicit_no_dependencies(text, allow_bare_none=False):
+                return text, candidate.get('source') or 'Business Impact field'
+        return '', ''
 
     def _story_points_raw(self, issue: dict) -> tuple[Any, str]:
         fields = issue.get('fields', {}) or {}
@@ -427,17 +540,26 @@ class ComplianceEngine:
                 linked_keys.append(key)
                 linked_projects.add(key.split('-', 1)[0].upper())
 
-        business_impact = self._field_evidence(issue, 'business_impact')
-        if (not normalized(declaration)) and _explicit_no_dependencies(business_impact, allow_bare_none=False):
-            declaration = business_impact
-            declaration_source = 'Business Impact field'
+        business_impact, business_impact_source = self._explicit_no_dependency_field_evidence(issue)
+        business_impact_declares_no_dependencies = bool(business_impact)
 
         declaration_norm = normalized(declaration)
         explicitly_none = _explicit_no_dependencies(declaration, allow_bare_none=True)
         has_declaration = bool(declaration_norm)
         has_links = bool(linked_keys)
 
-        if explicitly_none:
+        # Manager rule: when the Business Impact field explicitly says there
+        # are no dependencies, the Known Dependencies control is satisfied.
+        # This is an intentional override because ASOC initiatives sometimes
+        # document dependency absence in Business Impact rather than a dedicated
+        # dependency field. Bare values such as "None" are still not accepted
+        # here; the text must mention dependencies.
+        if business_impact_declares_no_dependencies:
+            passed = True
+            raw_source = business_impact_source or ''
+            source_label = 'Business Impact field' if not raw_source or raw_source.startswith('customfield_') else f'Business Impact field ({raw_source})'
+            evidence = f'{source_label}: dependencies explicitly declared as: {business_impact}'
+        elif explicitly_none:
             passed = True
             evidence = f'{declaration_source}: dependencies explicitly declared as: {declaration}'
         elif has_declaration and has_links:

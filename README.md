@@ -1,4 +1,7 @@
-# ASOC PI Readiness & Manager Sign-Off - Version 1.14
+# ASOC PI Readiness & Manager Sign-Off App v1.20
+
+Version 1.20 strengthens the Business Impact dependency rule: any Business Impact value containing clear wording such as "No dependencies" must pass Known Dependencies even when additional words follow it, for example "No dependencies and Use cases in place24Jun: create". It also adds a final safety scan across returned Jira fields for explicit no-dependency wording so duplicate or workspace-specific Business Impact fields are not missed.
+
 
 ## Important upgrade verification
 
@@ -6,8 +9,8 @@ Version 1.14 adds **deep descendant story point roll-up**: the app still request
 
 After starting the app, confirm all three indicators:
 
-1. The browser header displays **v1.16.0**.
-2. The dashboard displays a black **Build v1.16.0** banner.
+1. The browser header displays **v1.20.0**.
+2. The dashboard displays a black **Build v1.20.0** banner.
 3. `http://127.0.0.1:8000/health` reports `"version": "1.14.0"` and the expected application folder.
 
 The startup script runs from its own folder, uses that folder's virtual environment, blocks startup when an old process already owns port 8000, and disables stale browser/proxy caching.
@@ -130,7 +133,7 @@ The app also checks that:
 
 ## Upgrade an existing installation
 
-This is a complete replacement package, not a patch or hotfix. Stop the running app, extract the ZIP, and copy the extracted application files over the existing application folder. The ZIP intentionally does not contain `.env` or `data/pi_readiness.db`, so your Jira credentials, field mappings, sign-offs and audit history are not overwritten. Start the app with `start.bat` and confirm the header shows **v1.16.0**.
+This is a complete replacement package, not a patch or hotfix. Stop the running app, extract the ZIP, and copy the extracted application files over the existing application folder. The ZIP intentionally does not contain `.env` or `data/pi_readiness.db`, so your Jira credentials, field mappings, sign-offs and audit history are not overwritten. Start the app with `start.bat` and confirm the header shows **v1.20.0**.
 
 ## Run on a Windows laptop
 
@@ -294,3 +297,9 @@ Known Dependencies now passes when the mapped **Business Impact** field explicit
 ## v1.15 - Initiative sizing
 
 Initiative size is now derived from the final rolled-up Story Points total. The default size bands are XS <=20, S <=50, M <=100, L <=200, XL <=400 and XXL above 400. Thresholds are configurable in Settings and appear in the dashboard, CSV exports and PDF reports.
+
+
+## Version 1.17 update
+
+- Known Dependencies now passes whenever the mapped Business Impact field explicitly says there are no dependencies, even if the dedicated dependency field is blank, incomplete, or has no linked Jira dependency ticket.
+- Bare Business Impact values like `None` still do not pass unless dependencies are mentioned explicitly.

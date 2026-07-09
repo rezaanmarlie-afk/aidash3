@@ -212,6 +212,42 @@ def story_point_field_candidates(fields: list[dict[str, Any]], mapping: dict[str
     return list(dict.fromkeys(candidates))
 
 
+def business_impact_field_candidates(fields: list[dict[str, Any]], mapping: dict[str, str]) -> list[str]:
+    """Discover all likely Business Impact fields exposed by Jira.
+
+    Some Jira projects expose duplicate Business Impact fields or a project-
+    scoped custom field that is different from the globally resolved one. The
+    Known Dependencies control intentionally accepts an explicit declaration
+    such as "No dependencies" in Business Impact, so the scan must request
+    every plausible Business Impact field and let the compliance engine use the
+    populated one.
+    """
+    candidates: list[str] = []
+    mapped = mapping.get('business_impact')
+    if mapped:
+        candidates.append(mapped)
+
+    strong_exact = {
+        'businessimpact', 'businessimpacts', 'businessimpactvalue',
+        'businessvalue', 'businessbenefit', 'impact',
+    }
+    for field in fields:
+        field_id = str(field.get('id') or '').strip()
+        if not field_id:
+            continue
+        labels = [str(field.get('name') or '')]
+        labels.extend(str(clause or '') for clause in field.get('clauseNames') or [])
+        normalised = {_norm_field_label(label) for label in labels if label}
+        text = ' '.join(labels).casefold()
+        if (
+            normalised & strong_exact
+            or ('business' in text and ('impact' in text or 'value' in text or 'benefit' in text))
+        ):
+            candidates.append(field_id)
+
+    return list(dict.fromkeys(candidates))
+
+
 @app.middleware('http')
 async def expose_build_and_disable_stale_browser_cache(request: Request, call_next):
     response = await call_next(request)
@@ -341,6 +377,7 @@ def field_config() -> dict[str, Any]:
     parent_link_field = jira.resolve_field(['Parent Link'])
     epic_link_field = jira.resolve_field(['Epic Link'])
     story_point_ids = story_point_field_candidates(fields, mapping)
+    business_impact_ids = business_impact_field_candidates(fields, mapping)
 
     return {
         'mapping': mapping,
@@ -348,6 +385,11 @@ def field_config() -> dict[str, Any]:
         'story_point_field_names': [
             f"{(by_id.get(field_id) or {}).get('name', field_id)} ({field_id})"
             for field_id in story_point_ids
+        ],
+        'business_impact_field_ids': business_impact_ids,
+        'business_impact_field_names': [
+            f"{(by_id.get(field_id) or {}).get('name', field_id)} ({field_id})"
+            for field_id in business_impact_ids
         ],
         'pi_field': pi_field,
         'sm_field': sm_field,
@@ -485,6 +527,7 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
         'issuelinks', 'timetracking', 'parent',
         *cfg['mapping'].values(),
         *cfg.get('story_point_field_ids', []),
+        *cfg.get('business_impact_field_ids', []),
         *[criterion['field_id'] for criterion in cfg.get('additional_criteria', []) if criterion.get('field_id')],
         *[field_id for field_id in relation_ids if field_id],
     ]))
@@ -546,6 +589,7 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
 
     engine_mapping = dict(cfg['mapping'])
     engine_mapping['story_points_candidates'] = cfg.get('story_point_field_ids', [])
+    engine_mapping['business_impact_candidates'] = cfg.get('business_impact_field_ids', [])
     engine = ComplianceEngine(
         engine_mapping, cfg['internal_projects'], cfg['allow_description_fallback'],
         excluded_criteria=set(filters.get('excluded_criteria') or []),
@@ -628,6 +672,9 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
             'descendant_rollup_depth': descendant_stats.get('descendant_rollup_depth', 0),
             'descendant_linked_issues_loaded': descendant_stats.get('descendant_linked_issues_loaded', 0),
             'story_point_fields_requested': cfg.get('story_point_field_names', []),
+            'business_impact_fields_requested': cfg.get('business_impact_field_names', []),
+            'business_impact_dynamic_fields': story_point_enrichment.get('dynamic_business_impact_field_names', []),
+            'business_impact_issues_metadata_enriched': story_point_enrichment.get('business_impact_issues_enriched', 0),
             'story_point_dynamic_fields': story_point_enrichment.get('dynamic_field_names', []),
             'story_point_issues_metadata_enriched': story_point_enrichment.get('issues_enriched', 0),
             'story_point_enrichment_warning': story_point_enrichment.get('warning', ''),

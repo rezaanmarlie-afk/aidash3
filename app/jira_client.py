@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
@@ -476,6 +477,60 @@ class JiraClient:
     def _norm_field_label(value: str) -> str:
         return ''.join(ch for ch in str(value or '').casefold() if ch.isalnum())
 
+    @staticmethod
+    def _field_value_text(value: Any) -> str:
+        """Lightweight readable text for Jira field values used in metadata scans."""
+        if value is None:
+            return ''
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, list):
+            return ' '.join(JiraClient._field_value_text(v) for v in value if v is not None)
+        if isinstance(value, dict):
+            pieces = []
+            for key in ('value', 'name', 'displayName', 'summary', 'text'):
+                if key in value:
+                    pieces.append(JiraClient._field_value_text(value.get(key)))
+            if not pieces and 'content' in value:
+                pieces.append(JiraClient._field_value_text(value.get('content')))
+            return ' '.join(part for part in pieces if part)
+        return str(value)
+
+    @classmethod
+    def _field_text_declares_no_dependencies(cls, value: Any) -> bool:
+        text = re.sub(r'\s+', ' ', cls._field_value_text(value) or '').strip().casefold()
+        if not text:
+            return False
+        patterns = [
+            r'\bno\s+(?:known\s+|external\s+|internal\s+)?dependenc(?:y|ies)\b',
+            r'\bno\s+deps?\b',
+            r'\bdependenc(?:y|ies)\s*(?:-|–|—|:|=)?\s*(?:none|nil|n/a|na|not applicable|no)\b',
+            r'\bwithout\s+(?:any\s+)?dependenc(?:y|ies)\b',
+        ]
+        return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+    @classmethod
+    def _likely_business_impact_field(cls, field_id: str, name: str, schema: dict | None, raw_value: Any) -> bool:
+        label = str(name or field_id or '')
+        norm = cls._norm_field_label(label)
+        text = label.casefold()
+        strong_exact = {
+            'businessimpact', 'businessimpacts', 'businessimpactvalue',
+            'businessvalue', 'businessbenefit', 'impact', 'benefit',
+            'benefits', 'businesscaseimpact', 'businessoutcome',
+        }
+        if norm in strong_exact:
+            return True
+        if 'business' in text and any(token in text for token in ('impact', 'value', 'benefit', 'outcome', 'case')):
+            return True
+        # Safety net: if a returned issue field value itself explicitly says
+        # there are no dependencies, keep it as a Business Impact candidate so
+        # the compliance engine can use the manager's declaration even when the
+        # duplicate field name is not discoverable from the global catalogue.
+        return cls._field_text_declares_no_dependencies(raw_value)
+
     @classmethod
     def _likely_story_point_field(cls, field_id: str, name: str, schema: dict | None, raw_value: Any) -> bool:
         """Return True when a field is likely to carry agile estimation points.
@@ -580,12 +635,17 @@ class JiraClient:
                 'issues_enriched': 0,
                 'dynamic_field_ids': [],
                 'dynamic_field_names': [],
+                'business_impact_issues_enriched': 0,
+                'dynamic_business_impact_field_ids': [],
+                'dynamic_business_impact_field_names': [],
                 'warning': '',
             }
 
         known = {str(fid).strip() for fid in (known_field_ids or []) if str(fid).strip()}
         dynamic_names: dict[str, str] = {}
+        dynamic_business_names: dict[str, str] = {}
         issues_enriched = 0
+        business_issues_enriched = 0
         warnings: list[str] = []
         batch_size = max(1, int(getattr(self.settings, 'jira_scan_batch_size', 50)))
 
@@ -609,6 +669,7 @@ class JiraClient:
                 expanded_fields = expanded_issue.get('fields') or {}
                 target_fields = target.setdefault('fields', {})
                 candidates: list[dict[str, Any]] = []
+                business_candidates: list[dict[str, Any]] = []
                 for field_id, raw in expanded_fields.items():
                     fid = str(field_id)
                     name = names.get(fid, fid)
@@ -618,6 +679,9 @@ class JiraClient:
                         candidates.append({'field_id': fid, 'name': name, 'value': raw})
                         if fid not in known:
                             dynamic_names[fid] = name
+                    if self._likely_business_impact_field(fid, name, schema, raw):
+                        target_fields.setdefault(fid, raw)
+                        business_candidates.append({'field_id': fid, 'name': name, 'value': raw})
                 if candidates:
                     # Preserve candidates already created by a previous batch, but
                     # replace duplicate field IDs with the latest metadata value.
@@ -630,12 +694,29 @@ class JiraClient:
                         merged[str(item['field_id'])] = item
                     target['_story_point_candidates'] = list(merged.values())
                     issues_enriched += 1
+                if business_candidates:
+                    merged_business: dict[str, dict[str, Any]] = {
+                        str(item.get('field_id')): dict(item)
+                        for item in target.get('_business_impact_candidates', []) or []
+                        if isinstance(item, dict) and item.get('field_id')
+                    }
+                    for item in business_candidates:
+                        merged_business[str(item['field_id'])] = item
+                        dynamic_business_names[str(item['field_id'])] = str(item.get('name') or item['field_id'])
+                    target['_business_impact_candidates'] = list(merged_business.values())
+                    business_issues_enriched += 1
 
         dynamic_ids = list(dynamic_names.keys())
+        dynamic_business_ids = list(dynamic_business_names.keys())
         return {
             'issues_enriched': issues_enriched,
             'dynamic_field_ids': dynamic_ids,
             'dynamic_field_names': [f'{dynamic_names[fid]} ({fid})' for fid in dynamic_ids],
+            'business_impact_issues_enriched': business_issues_enriched,
+            'dynamic_business_impact_field_ids': dynamic_business_ids,
+            'dynamic_business_impact_field_names': [
+                f'{dynamic_business_names[fid]} ({fid})' for fid in dynamic_business_ids
+            ],
             'warning': '; '.join(warnings[:3]),
         }
 
