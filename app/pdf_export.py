@@ -266,6 +266,10 @@ def build_summary_pdf(scan: dict[str, Any], filters: dict[str, Any], version: st
 def _iter_issues(result: dict[str, Any]) -> Iterable[tuple[str, str, dict[str, Any]]]:
     root = result['initiative']
     yield 'Top-level ticket', '', root
+    for story in result.get('direct_stories', []) or []:
+        yield 'Direct Story', root.get('key', ''), story
+    for item in result.get('additional_descendants', []) or []:
+        yield 'Additional descendant work', root.get('key', ''), item
     for epic in result.get('epics', []):
         yield 'Epic', root.get('key', ''), epic
         for story in epic.get('stories', []):
@@ -337,7 +341,7 @@ def build_detail_pdf(
                 f"Full hierarchy compliance: {result.get('hierarchy_score', 0)}% | "
                 f"Epics: {result.get('epic_count', 0)} | Stories: {result.get('story_count', 0)} | "
                 f"Story points roll-up: {result.get('story_points_total', 0)} "
-                f"(Top: {result.get('initiative_story_points', 0)}, Epics: {result.get('epic_story_points', 0)}, Stories: {result.get('story_story_points', 0)}) | "
+                f"(Top: {result.get('initiative_story_points', 0)}, Epics: {result.get('epic_story_points', 0)}, Stories: {result.get('story_story_points', 0)}, Direct stories: {result.get('direct_story_points', 0)}, Other descendants: {result.get('additional_descendant_story_points', 0)}) | "
                 f"Failures: {result.get('failure_count', 0)} | Sign-Off: {signoff_text}",
                 styles['body'],
             ),

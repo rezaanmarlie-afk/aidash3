@@ -153,7 +153,7 @@ button:disabled { opacity: .7; cursor: wait; }
 .additional-criteria-summary { border-left: 5px solid #363636; }
 .pill.custom-control { background: #ededee; color: #292929; }
 
-/* v1.11 - story point roll-up with Jira field fallback */
+/* v1.14 - deep descendant story point roll-up */
 .kpi-grid.eight { grid-template-columns: repeat(4, 1fr); }
 .story-points-panel { border-left: 5px solid #222; }
 .story-point-breakdown { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
@@ -163,3 +163,11 @@ button:disabled { opacity: .7; cursor: wait; }
 .issue-story-points { margin-top: 6px; color: var(--ink); font-size: 12px; font-weight: 750; }
 @media (max-width: 1050px) { .kpi-grid.eight { grid-template-columns: repeat(2, 1fr); } .story-point-breakdown { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 700px) { .kpi-grid.eight, .story-point-breakdown { grid-template-columns: 1fr; } }
+.direct-story-heading {
+  margin: 16px 0 8px;
+  padding: 8px 12px;
+  border-left: 4px solid #E60000;
+  background: #fff5f5;
+  font-weight: 700;
+  color: #333;
+}

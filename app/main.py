@@ -303,6 +303,69 @@ def select_top_level_issues(
     ]
 
 
+
+def _point_value(value: float | int | str | None) -> int | float:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return int(number) if number.is_integer() else round(number, 2)
+
+
+def apply_descendant_story_point_rollup(
+    result: dict[str, Any], descendants: list[dict], engine: ComplianceEngine
+) -> dict[str, Any]:
+    """Add story points from all descendant delivery work not in the normal tree.
+
+    The normal compliance tree remains top-level→Epic→Story. This roll-up is
+    intentionally broader because Jira projects can place pointed delivery work
+    under Features, Tasks, Capabilities or extra hierarchy levels. These extra
+    descendants are informational and do not change compliance scoring.
+    """
+    counted_keys = {result.get('initiative', {}).get('key')}
+    for epic in result.get('epics', []) or []:
+        counted_keys.add(epic.get('key'))
+        for story in epic.get('stories', []) or []:
+            counted_keys.add(story.get('key'))
+    for story in result.get('direct_stories', []) or []:
+        counted_keys.add(story.get('key'))
+
+    additional: list[dict[str, Any]] = []
+    additional_points = 0.0
+    for issue in descendants or []:
+        key = issue.get('key')
+        if not key or key in counted_keys:
+            continue
+        evaluated = engine.evaluate_issue(issue, 'descendant')
+        points = float(evaluated.get('story_points') or 0)
+        if points <= 0:
+            # Keep unpointed descendants out of the details to avoid clutter,
+            # but they remain counted in diagnostics as loaded descendants.
+            continue
+        evaluated['hierarchy_role'] = 'Additional descendant work'
+        additional.append(evaluated)
+        additional_points += points
+        counted_keys.add(key)
+
+    if additional:
+        current_total = float(result.get('story_points_total') or 0)
+        new_total = current_total + additional_points
+        result['additional_descendants'] = additional
+        result['additional_descendant_count'] = len(additional)
+        result['additional_descendant_story_points'] = _point_value(additional_points)
+        result['story_points_total'] = _point_value(new_total)
+        result['rolled_story_points'] = _point_value(new_total)
+        result['other_descendant_story_points'] = _point_value(additional_points)
+        result['initiative']['story_points_from_other_descendants'] = _point_value(additional_points)
+        result['initiative']['rolled_story_points'] = _point_value(new_total)
+        result['initiative']['total_story_points'] = _point_value(new_total)
+    else:
+        result.setdefault('additional_descendants', [])
+        result.setdefault('additional_descendant_count', 0)
+        result.setdefault('additional_descendant_story_points', 0)
+        result.setdefault('other_descendant_story_points', 0)
+    return result
+
 def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, Any]:
     cache_key = scan_cache_key(filters)
     cached = _SCAN_CACHE.get(cache_key)
@@ -358,11 +421,44 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
         base_matches, cfg['initiative_issue_type'], cfg['restrict_initiative_type']
     )
 
+    parent_link_id = (cfg.get('parent_link_field') or {}).get('id')
+    epic_link_id = (cfg.get('epic_link_field') or {}).get('id')
     epics_by_initiative, stories_by_epic, hierarchy_stats = jira.bulk_hierarchy(
         initiatives,
         fields=required_fields,
-        parent_link_field_id=(cfg.get('parent_link_field') or {}).get('id'),
-        epic_link_field_id=(cfg.get('epic_link_field') or {}).get('id'),
+        parent_link_field_id=parent_link_id,
+        epic_link_field_id=epic_link_id,
+        max_results=settings.jira_scan_max_results,
+    )
+    direct_stories_by_initiative = hierarchy_stats.get('_direct_stories_by_initiative', {}) or {}
+
+    descendants_by_initiative, descendant_stats = jira.bulk_descendant_issues(
+        initiatives,
+        fields=required_fields,
+        parent_link_field_id=parent_link_id,
+        epic_link_field_id=epic_link_id,
+        max_results=settings.jira_scan_max_results,
+        max_depth=6,
+    )
+
+    # Story Points can differ by Jira board/workspace. The initial bulk scan
+    # requests configured/global candidates for performance; this enrichment
+    # performs a metadata-aware second pass across the loaded hierarchy so
+    # team-managed or board-specific estimation fields are not missed.
+    all_loaded_issues = list({
+        issue.get('key'): issue
+        for issue in [
+            *initiatives,
+            *[epic for epics in epics_by_initiative.values() for epic in epics],
+            *[story for stories in stories_by_epic.values() for story in stories],
+            *[story for stories in direct_stories_by_initiative.values() for story in stories],
+            *[issue for issues in descendants_by_initiative.values() for issue in issues],
+        ]
+        if issue.get('key')
+    }.values())
+    story_point_enrichment = jira.enrich_story_points_from_issue_metadata(
+        all_loaded_issues,
+        known_field_ids=cfg.get('story_point_field_ids', []),
         max_results=settings.jira_scan_max_results,
     )
 
@@ -380,7 +476,13 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
             epic['key']: stories_by_epic.get(epic['key'], [])
             for epic in epics
         }
-        result = engine.evaluate_tree(initiative, epics, scoped_stories)
+        direct_stories = direct_stories_by_initiative.get(initiative['key'], [])
+        result = engine.evaluate_tree(initiative, epics, scoped_stories, direct_stories=direct_stories)
+        result = apply_descendant_story_point_rollup(
+            result,
+            descendants_by_initiative.get(initiative['key'], []),
+            engine,
+        )
         latest = db.latest_signoff(initiative['key'], filters['pi_value'], filters['scrum_master_id'])
         if latest:
             latest['is_current'] = latest['snapshot_hash'] == result['snapshot_hash']
@@ -416,6 +518,10 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
             'initiative_story_points': sum(float(result.get('initiative_story_points') or 0) for result in results),
             'epic_story_points': sum(float(result.get('epic_story_points') or 0) for result in results),
             'story_story_points': sum(float(result.get('story_story_points') or 0) for result in results),
+            'direct_story_points': sum(float(result.get('direct_story_points') or 0) for result in results),
+            'nested_story_points': sum(float(result.get('nested_story_points') or 0) for result in results),
+            'additional_descendant_story_points': sum(float(result.get('additional_descendant_story_points') or 0) for result in results),
+            'additional_descendant_count': sum(int(result.get('additional_descendant_count') or 0) for result in results),
         },
         'diagnostics': {
             'elapsed_seconds': round(monotonic() - started, 2),
@@ -428,7 +534,15 @@ def run_scan(filters: dict[str, Any], force_refresh: bool = False) -> dict[str, 
             }),
             'epics_loaded': hierarchy_stats['epics_loaded'],
             'stories_loaded': hierarchy_stats['stories_loaded'],
+            'nested_stories_loaded': hierarchy_stats.get('nested_stories_loaded', hierarchy_stats.get('stories_loaded', 0)),
+            'direct_stories_loaded': hierarchy_stats.get('direct_stories_loaded', 0),
+            'descendant_issues_loaded': descendant_stats.get('descendant_issues_loaded', 0),
+            'descendant_rollup_depth': descendant_stats.get('descendant_rollup_depth', 0),
+            'descendant_linked_issues_loaded': descendant_stats.get('descendant_linked_issues_loaded', 0),
             'story_point_fields_requested': cfg.get('story_point_field_names', []),
+            'story_point_dynamic_fields': story_point_enrichment.get('dynamic_field_names', []),
+            'story_point_issues_metadata_enriched': story_point_enrichment.get('issues_enriched', 0),
+            'story_point_enrichment_warning': story_point_enrichment.get('warning', ''),
             'cache_hit': False,
         },
         'config': cfg,
@@ -770,8 +884,8 @@ def _summary_export_rows(scan: dict[str, Any], filters: dict[str, Any]) -> list[
         'PI', 'Scrum Master', 'Top-Level Ticket', 'Issue Type', 'Summary',
         'Top-Level Ticket Compliance %', 'Top-Level Ticket Compliant',
         'Full Hierarchy Compliance %', 'Full Hierarchy Ready',
-        'Epic Count', 'Story Count', 'Top-Level Story Points', 'Epic Story Points',
-        'Story Story Points', 'Rolled-Up Story Points', 'Top-Level Failures', 'Hierarchy Failures',
+        'Epic Count', 'Story Count', 'Direct Story Count', 'Top-Level Story Points', 'Epic Story Points',
+        'Story Story Points', 'Direct Story Points', 'Other Descendant Story Points', 'Rolled-Up Story Points', 'Top-Level Failures', 'Hierarchy Failures',
         'Excluded Criteria', 'Latest Sign-Off', 'Sign-Off Current', 'JQL'
     ]]
     for result in scan['results']:
@@ -782,8 +896,8 @@ def _summary_export_rows(scan: dict[str, Any], filters: dict[str, Any]) -> list[
             result['initiative']['summary'], result['ticket_score'],
             'Yes' if result['ticket_compliant'] else 'No', result['hierarchy_score'],
             'Yes' if result['compliant'] else 'No', result['epic_count'], result['story_count'],
-            result.get('initiative_story_points', 0), result.get('epic_story_points', 0),
-            result.get('story_story_points', 0), result.get('story_points_total', 0),
+            result.get('direct_story_count', 0), result.get('initiative_story_points', 0), result.get('epic_story_points', 0),
+            result.get('story_story_points', 0), result.get('direct_story_points', 0), result.get('additional_descendant_story_points', 0), result.get('story_points_total', 0),
             result['ticket_failure_count'], result['failure_count'],
             ', '.join(criteria_label_map().get(key, key) for key in filters.get('excluded_criteria') or []) or 'None',
             signoff.get('decision', ''),
@@ -836,6 +950,10 @@ def _detailed_export_rows(
                 ])
 
         add_issue(root, 'Top-level ticket')
+        for story in result.get('direct_stories', []) or []:
+            add_issue(story, 'Direct Story', root['key'])
+        for item in result.get('additional_descendants', []) or []:
+            add_issue(item, 'Additional descendant work', root['key'])
         for epic in result['epics']:
             add_issue(epic, 'Epic', root['key'])
             for story in epic.get('stories', []):

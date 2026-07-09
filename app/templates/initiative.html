@@ -36,11 +36,13 @@
 
 <section class="panel story-points-panel">
   <div class="eyebrow">Story point roll-up</div>
-  <p class="muted">This totals the mapped Jira Story Points / sizing field from the parent ticket, linked Epics and linked Stories. It is informational and does not change compliance scoring.</p>
+  <p class="muted">This totals the mapped Jira Story Points / sizing field from the parent ticket, linked Epics, Stories under Epics, Stories linked directly to the top-level ticket, and additional descendant delivery work found through Jira parent/Epic hierarchy or hierarchy-like links. It is informational and does not change compliance scoring.</p>
   <div class="story-point-breakdown">
     <div class="story-point-box"><span>Top-level ticket points</span><strong>{{ result.initiative_story_points }}</strong></div>
     <div class="story-point-box"><span>Epic points</span><strong>{{ result.epic_story_points }}</strong></div>
     <div class="story-point-box"><span>Story points</span><strong>{{ result.story_story_points }}</strong></div>
+    <div class="story-point-box"><span>Direct story points</span><strong>{{ result.direct_story_points or 0 }}</strong></div>
+    <div class="story-point-box"><span>Other descendant points</span><strong>{{ result.additional_descendant_story_points or 0 }}</strong></div>
     <div class="story-point-box"><span>Total rolled-up points</span><strong>{{ result.story_points_total }}</strong></div>
   </div>
 </section>
@@ -75,6 +77,15 @@
 
 <section class="hierarchy">
   {{ issue_card(result.initiative, 0) }}
+  {% if result.direct_stories %}
+    <div class="direct-story-heading">Stories linked directly to {{ result.initiative.key }}</div>
+    {% for story in result.direct_stories %}{{ issue_card(story, 2) }}{% endfor %}
+  {% endif %}
+
+  {% if result.additional_descendants %}
+    <div class="direct-story-heading">Additional descendant delivery work included in story-point roll-up</div>
+    {% for item in result.additional_descendants %}{{ issue_card(item, 2) }}{% endfor %}
+  {% endif %}
   {% for epic in result.epics %}
     {{ issue_card(epic, 1) }}
     {% for story in epic.stories %}{{ issue_card(story, 2) }}{% endfor %}

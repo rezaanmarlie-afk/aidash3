@@ -68,5 +68,51 @@ def test_bulk_hierarchy_uses_portfolio_queries_not_one_query_per_ticket():
     )
     assert [issue['key'] for issue in epics['NMGOS-INIT-1']] == ['NMGOS-EP-1']
     assert [issue['key'] for issue in stories['NMGOS-EP-1']] == ['NMGOS-ST-1']
-    assert stats == {'epics_loaded': 1, 'stories_loaded': 1}
+    assert stats['epics_loaded'] == 1
+    assert stats['stories_loaded'] == 1
+    assert stats['nested_stories_loaded'] == 1
+    assert stats['direct_stories_loaded'] == 0
     assert len(jira.queries) == 2
+
+class DeepHierarchyJira(FakeJira):
+    def search(self, jql, fields=None, max_results=500):
+        self.queries.append(jql)
+        if 'NMGOS-3894' in jql:
+            return [{
+                'key': 'NMGOS-FEAT-1',
+                'fields': {
+                    'issuetype': {'name': 'Feature'},
+                    'parent': {'key': 'NMGOS-3894'},
+                    'issuelinks': [],
+                },
+            }]
+        if 'NMGOS-FEAT-1' in jql:
+            return [{
+                'key': 'NMGOS-TASK-1',
+                'fields': {
+                    'issuetype': {'name': 'Task'},
+                    'parent': {'key': 'NMGOS-FEAT-1'},
+                    'issuelinks': [],
+                    'customfield_sp': 21,
+                },
+            }]
+        return []
+
+
+def test_bulk_descendants_follows_non_standard_intermediate_hierarchy_levels():
+    jira = DeepHierarchyJira()
+    roots = [{
+        'key': 'NMGOS-3894',
+        'fields': {'issuetype': {'name': 'Initiative'}, 'issuelinks': []},
+    }]
+    descendants, stats = jira.bulk_descendant_issues(
+        roots,
+        fields=['summary', 'issuetype', 'parent', 'issuelinks', 'customfield_sp'],
+        parent_link_field_id=None,
+        epic_link_field_id=None,
+        max_results=100,
+        max_depth=4,
+    )
+    assert [issue['key'] for issue in descendants['NMGOS-3894']] == ['NMGOS-FEAT-1', 'NMGOS-TASK-1']
+    assert stats['descendant_issues_loaded'] == 2
+    assert stats['descendant_rollup_depth'] == 2

@@ -5,8 +5,8 @@ from app.main import APP_VERSION, ROOT_DIR, health
 
 def test_running_build_is_visible_and_health_reports_source():
     payload = health()
-    assert APP_VERSION == '1.11.0'
-    assert payload['version'] == '1.11.0'
+    assert APP_VERSION == '1.14.0'
+    assert payload['version'] == '1.14.0'
     assert Path(payload['application_source']).resolve() == ROOT_DIR.resolve()
     assert Path(payload['main_file']).resolve() == (ROOT_DIR / 'app' / 'main.py').resolve()
 

@@ -315,10 +315,9 @@ class ComplianceEngine:
         fields = issue.get('fields', {}) or {}
         zero_candidate: tuple[Any, str] | None = None
         non_numeric_candidate: tuple[Any, str] | None = None
-        for field_id in self.story_point_field_ids:
-            if field_id not in fields:
-                continue
-            raw = fields.get(field_id)
+
+        def consider(raw: Any, field_id: str) -> tuple[Any, str] | None:
+            nonlocal zero_candidate, non_numeric_candidate
             number = self._number(raw)
             if number is not None:
                 if number > 0:
@@ -328,6 +327,33 @@ class ComplianceEngine:
             elif flatten_text(raw):
                 if non_numeric_candidate is None:
                     non_numeric_candidate = (raw, field_id)
+            return None
+
+        seen: set[str] = set()
+        for field_id in self.story_point_field_ids:
+            if field_id in seen or field_id not in fields:
+                continue
+            seen.add(field_id)
+            found = consider(fields.get(field_id), field_id)
+            if found:
+                return found
+
+        # Jira can expose different estimation fields per board/team-managed
+        # workspace. The scan enriches issues with candidate fields discovered
+        # from the actual issue metadata when the global field catalogue is not
+        # sufficient. Treat those as a second-priority source so an explicit
+        # manager mapping still wins when both are populated.
+        for candidate in issue.get('_story_point_candidates', []) or []:
+            if not isinstance(candidate, dict):
+                continue
+            field_id = str(candidate.get('field_id') or '').strip()
+            if not field_id or field_id in seen:
+                continue
+            seen.add(field_id)
+            found = consider(candidate.get('value'), field_id)
+            if found:
+                return found
+
         return zero_candidate or non_numeric_candidate or (None, '')
 
     def _story_points_value(self, issue: dict) -> float:
@@ -569,10 +595,17 @@ class ComplianceEngine:
             'failure_count': applicable_count - passed_count,
         }
 
-    def evaluate_tree(self, initiative: dict, epics: list[dict], stories_by_epic: dict[str, list[dict]]) -> dict:
+    def evaluate_tree(
+        self,
+        initiative: dict,
+        epics: list[dict],
+        stories_by_epic: dict[str, list[dict]],
+        direct_stories: list[dict] | None = None,
+    ) -> dict:
         initiative_result = self.evaluate_issue(initiative, 'top_level')
         epic_results = []
         story_results = []
+        direct_story_results = [self.evaluate_issue(s, 'story') for s in (direct_stories or [])]
         for epic in epics:
             er = self.evaluate_issue(epic, 'epic')
             children = stories_by_epic.get(epic.get('key'), [])
@@ -586,10 +619,13 @@ class ComplianceEngine:
 
         initiative_own_story_points = float(initiative_result.get('story_points') or 0)
         epic_own_story_points = sum(float(epic.get('story_points') or 0) for epic in epic_results)
-        story_own_story_points = sum(float(story.get('story_points') or 0) for story in story_results)
+        nested_story_own_story_points = sum(float(story.get('story_points') or 0) for story in story_results)
+        direct_story_own_story_points = sum(float(story.get('story_points') or 0) for story in direct_story_results)
+        story_own_story_points = nested_story_own_story_points + direct_story_own_story_points
         rolled_story_points = initiative_own_story_points + epic_own_story_points + story_own_story_points
         initiative_result['story_points_from_epics'] = _point_value(epic_own_story_points)
         initiative_result['story_points_from_stories'] = _point_value(story_own_story_points)
+        initiative_result['story_points_from_direct_stories'] = _point_value(direct_story_own_story_points)
         initiative_result['rolled_story_points'] = _point_value(rolled_story_points)
         initiative_result['total_story_points'] = _point_value(rolled_story_points)
 
@@ -606,7 +642,7 @@ class ComplianceEngine:
                 remediation='Break every Epic down into linked Stories before manager sign-off.'
             )),
         ]
-        all_items = [initiative_result, *epic_results, *story_results]
+        all_items = [initiative_result, *epic_results, *story_results, *direct_story_results]
         compliant = all(i['passed'] for i in all_items) and all(c.passed for c in structural_checks)
         failures = sum(i['failure_count'] for i in all_items) + sum(1 for c in structural_checks if not c.passed)
         total_applicable = (
@@ -618,6 +654,7 @@ class ComplianceEngine:
         result = {
             'initiative': initiative_result,
             'epics': epic_results,
+            'direct_stories': direct_story_results,
             'structural_checks': [asdict(c) for c in structural_checks],
             # Manager Sign-Off remains governed by the complete hierarchy.
             'compliant': compliant,
@@ -633,11 +670,15 @@ class ComplianceEngine:
             'ticket_failure_count': initiative_result['failure_count'],
             'failure_count': failures,
             'epic_count': len(epic_results),
-            'story_count': len(story_results),
+            'story_count': len(story_results) + len(direct_story_results),
+            'nested_story_count': len(story_results),
+            'direct_story_count': len(direct_story_results),
             'all_items_count': len(all_items),
             'initiative_story_points': _point_value(initiative_own_story_points),
             'epic_story_points': _point_value(epic_own_story_points),
             'story_story_points': _point_value(story_own_story_points),
+            'nested_story_points': _point_value(nested_story_own_story_points),
+            'direct_story_points': _point_value(direct_story_own_story_points),
             'story_points_total': _point_value(rolled_story_points),
             'rolled_story_points': _point_value(rolled_story_points),
             'excluded_criteria': sorted(self.excluded_criteria),

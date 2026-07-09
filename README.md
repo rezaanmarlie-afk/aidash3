@@ -1,14 +1,14 @@
-# ASOC PI Readiness & Manager Sign-Off - Version 1.11
+# ASOC PI Readiness & Manager Sign-Off - Version 1.14
 
 ## Important upgrade verification
 
-Version 1.11 adds **story point roll-up hardening**: the app now requests all likely Jira Story Points / Story point estimate custom fields, not only the single saved mapping, and rolls up the populated field from linked Stories and Epics to the parent top-level ticket, while retaining Jira project-field criteria, criterion exclusions, PDF exports and Jira Cloud Atlassian Document Format support for DoR, DOR, DoD and DOD sections.
+Version 1.14 adds **deep descendant story point roll-up**: the app still requests the saved/global/dynamic Story Points fields, but it now follows Jira parent hierarchy, Parent Link, Epic Link and hierarchy-like issue links up to six levels deep. This means pointed Tasks, Features, Capabilities, directly linked Stories and other descendant delivery work can be reflected against the parent Initiative/top-level ticket even when they are not in the strict Initiative→Epic→Story structure. It retains Jira project-field criteria, criterion exclusions, PDF exports and Jira Cloud Atlassian Document Format support for DoR, DOR, DoD and DOD sections.
 
 After starting the app, confirm all three indicators:
 
-1. The browser header displays **v1.11.0**.
-2. The dashboard displays a black **Build v1.11.0** banner.
-3. `http://127.0.0.1:8000/health` reports `"version": "1.11.0"` and the expected application folder.
+1. The browser header displays **v1.14.0**.
+2. The dashboard displays a black **Build v1.14.0** banner.
+3. `http://127.0.0.1:8000/health` reports `"version": "1.14.0"` and the expected application folder.
 
 The startup script runs from its own folder, uses that folder's virtual environment, blocks startup when an old process already owns port 8000, and disables stale browser/proxy caching.
 
@@ -45,7 +45,7 @@ The PI value, Scrum Master account ID, priority and project are configurable. Th
 
 ## Story point roll-up
 
-Version 1.11 keeps story points separate from compliance scoring. Story points are informational and auditable; they do not add a pass/fail control unless you explicitly configure an additional Jira field criterion.
+Version 1.14 keeps story points separate from compliance scoring. Story points are informational and auditable; they do not add a pass/fail control unless you explicitly configure an additional Jira field criterion.
 
 For each top-level ticket the app shows:
 
@@ -130,7 +130,7 @@ The app also checks that:
 
 ## Upgrade an existing installation
 
-This is a complete replacement package, not a patch or hotfix. Stop the running app, extract the ZIP, and copy the extracted application files over the existing application folder. The ZIP intentionally does not contain `.env` or `data/pi_readiness.db`, so your Jira credentials, field mappings, sign-offs and audit history are not overwritten. Start the app with `start.bat` and confirm the header shows **v1.11.0**.
+This is a complete replacement package, not a patch or hotfix. Stop the running app, extract the ZIP, and copy the extracted application files over the existing application folder. The ZIP intentionally does not contain `.env` or `data/pi_readiness.db`, so your Jira credentials, field mappings, sign-offs and audit history are not overwritten. Start the app with `start.bat` and confirm the header shows **v1.14.0**.
 
 ## Run on a Windows laptop
 
@@ -265,6 +265,23 @@ python -m pytest -q
 ```
 
 
-## Version 1.11 story point fix
+## Version 1.14 story point fix
 
-If your dashboard showed zero story points in Version 1.10, the cause was usually duplicate Jira Story Points custom fields. A saved field mapping could be valid globally but empty for the NMGOS project. Version 1.11 requests the saved Story Points field plus every likely Jira Story Points / Story point estimate field discovered from Jira metadata. The compliance engine uses the first populated numeric value per ticket and shows the requested field names in Scan diagnostics.
+If some boards/workspaces still showed missing story points in Version 1.11, the cause was usually a team-managed or board-specific estimation custom field that was not discoverable from the global Jira field catalogue. Version 1.14 now performs a second-pass enrichment against the actual loaded issues using `fields=*all` with `expand=names,schema`. The compliance engine uses the manager-mapped Story Points field first, then global candidates, then issue-metadata candidates. Scan diagnostics show both the requested fields and the additional fields discovered from loaded issues.
+
+## Version 1.14 update
+
+- Story point roll-up now includes Stories linked directly to the top-level Initiative/ticket, not only Stories under Epics.
+- Jira hierarchy diagnostics now separates nested Stories from direct Stories.
+- Dashboard, detail view, CSV exports and PDF exports show direct Story counts/points where applicable.
+- This resolves cases such as an Initiative with pointed Stories directly attached to it but no reflected Initiative roll-up.
+
+
+## Version 1.14 update
+
+- Adds a deep descendant roll-up scan for story points.
+- Follows modern Jira `parent`, legacy `Parent Link`, legacy `Epic Link`, and hierarchy-like issue links.
+- Rolls up story points from non-standard child work such as Tasks, Features, Capabilities or additional intermediate hierarchy levels.
+- Keeps this broader descendant roll-up informational only; it does not change compliance scoring or Manager Sign-Off readiness.
+- Dashboard diagnostics now show descendant issues loaded, roll-up depth and hierarchy-like linked issues included.
+- Dashboard, detail view, CSV exports and PDF exports show additional descendant story points separately from normal Epic/Story points.

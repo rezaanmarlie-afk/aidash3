@@ -1,5 +1,5 @@
 from app.compliance import ComplianceEngine
-from app.main import _detailed_export_rows, _summary_export_rows
+from app.main import _detailed_export_rows, _summary_export_rows, apply_descendant_story_point_rollup
 from app.pdf_export import build_detail_pdf, build_summary_pdf
 
 
@@ -79,3 +79,70 @@ def test_story_points_fallback_uses_populated_candidate_when_saved_mapping_is_em
     assert result['story_story_points'] == 13
     assert result['story_points_total'] == 13
     assert result['epics'][0]['stories'][0]['story_points'] == 13
+
+
+def test_story_points_uses_issue_metadata_candidate_when_field_not_in_saved_mapping():
+    engine = ComplianceEngine({'story_points': 'customfield_company_managed'}, ['NMGOS'])
+    root = issue('NMGOS-20', 'Initiative')
+    epic = issue('NMGOS-21', 'Epic')
+    story = issue('NMGOS-22', 'Story')
+    story['_story_point_candidates'] = [
+        {'field_id': 'customfield_team_workspace', 'name': 'Story point estimate', 'value': 21}
+    ]
+
+    result = engine.evaluate_tree(root, [epic], {'NMGOS-21': [story]})
+
+    assert result['story_story_points'] == 21
+    assert result['story_points_total'] == 21
+    assert result['epics'][0]['stories'][0]['story_points'] == 21
+
+
+def test_dynamic_story_point_candidate_does_not_override_explicit_populated_mapping():
+    engine = ComplianceEngine({'story_points': 'customfield_mapped'}, ['NMGOS'])
+    root = issue('NMGOS-30', 'Initiative')
+    epic = issue('NMGOS-31', 'Epic')
+    story = issue('NMGOS-32', 'Story')
+    story['fields']['customfield_mapped'] = 5
+    story['_story_point_candidates'] = [
+        {'field_id': 'customfield_team_workspace', 'name': 'Story point estimate', 'value': 99}
+    ]
+
+    result = engine.evaluate_tree(root, [epic], {'NMGOS-31': [story]})
+
+    assert result['story_story_points'] == 5
+
+
+def test_story_points_roll_up_from_stories_linked_directly_to_initiative():
+    engine = ComplianceEngine({'story_points': 'customfield_sp'}, ['NMGOS'])
+    root = issue('NMGOS-3894', 'Initiative')
+    direct_story_a = issue('NMGOS-4001', 'Story', 13)
+    direct_story_b = issue('NMGOS-4002', 'Story', 21)
+
+    result = engine.evaluate_tree(root, [], {}, direct_stories=[direct_story_a, direct_story_b])
+
+    assert result['direct_story_count'] == 2
+    assert result['story_count'] == 2
+    assert result['direct_story_points'] == 34
+    assert result['story_story_points'] == 34
+    assert result['story_points_total'] == 34
+    assert result['initiative']['rolled_story_points'] == 34
+    assert [story['key'] for story in result['direct_stories']] == ['NMGOS-4001', 'NMGOS-4002']
+
+
+
+def test_story_points_roll_up_from_non_standard_descendant_work_without_changing_compliance_score():
+    engine = ComplianceEngine({'story_points': 'customfield_sp'}, ['NMGOS'])
+    root = issue('NMGOS-3894', 'Initiative')
+    result = engine.evaluate_tree(root, [], {})
+    before_score = result['hierarchy_score']
+    feature = issue('NMGOS-4100', 'Feature', 8)
+    task = issue('NMGOS-4101', 'Task', 13)
+
+    result = apply_descendant_story_point_rollup(result, [feature, task], engine)
+
+    assert result['additional_descendant_count'] == 2
+    assert result['additional_descendant_story_points'] == 21
+    assert result['story_points_total'] == 21
+    assert result['initiative']['rolled_story_points'] == 21
+    assert result['hierarchy_score'] == before_score
+    assert [item['key'] for item in result['additional_descendants']] == ['NMGOS-4100', 'NMGOS-4101']
