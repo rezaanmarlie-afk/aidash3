@@ -213,3 +213,63 @@ def test_business_impact_adf_no_dependencies_with_other_words_passes():
     result = engine.evaluate_issue(issue)
     check = dependency_check(result)
     assert check['passed'] is True
+
+
+def test_business_impact_managed_dependency_with_other_words_passes():
+    engine = ComplianceEngine({
+        'dependencies': 'customfield_deps',
+        'business_impact': 'customfield_bi',
+    }, ['NMGOS'])
+    issue = base_issue(
+        business_impact='Dependency on infrastructure but managed 24Jun: tickets to be ready for review Monday has context menu',
+        dependencies='',
+    )
+    result = engine.evaluate_issue(issue)
+    check = dependency_check(result)
+    assert check['passed'] is True
+    assert 'managed/tracked' in check['evidence']
+    assert 'Dependency on infrastructure' in check['evidence']
+
+
+def test_business_impact_bare_dependency_without_management_still_fails():
+    engine = ComplianceEngine({
+        'dependencies': 'customfield_deps',
+        'business_impact': 'customfield_bi',
+    }, ['NMGOS'])
+    issue = base_issue(
+        business_impact='Dependency on infrastructure',
+        dependencies='',
+    )
+    result = engine.evaluate_issue(issue)
+    check = dependency_check(result)
+    assert check['passed'] is False
+
+
+def test_unmapped_business_impact_managed_dependency_passes():
+    engine = ComplianceEngine({
+        'dependencies': 'customfield_deps',
+        'business_impact': 'customfield_wrong_bi',
+    }, ['NMGOS'])
+    issue = base_issue(business_impact='', dependencies='')
+    issue['fields']['customfield_unknown_business_impact'] = 'Dependency on infrastructure but managed 24Jun: tickets to be ready for review Monday has context menu'
+    result = engine.evaluate_issue(issue)
+    check = dependency_check(result)
+    assert check['passed'] is True
+    assert 'managed/tracked' in check['evidence']
+
+
+def test_business_impact_adf_managed_dependency_passes():
+    engine = ComplianceEngine({
+        'dependencies': 'customfield_deps',
+        'business_impact': 'customfield_bi',
+    }, ['NMGOS'])
+    issue = base_issue(business_impact='', dependencies='')
+    issue['fields']['customfield_bi'] = {
+        'type': 'doc',
+        'content': [
+            {'type': 'paragraph', 'content': [{'type': 'text', 'text': 'Dependency on infrastructure but managed 24Jun: tickets to be ready for review Monday has context menu'}]}
+        ],
+    }
+    result = engine.evaluate_issue(issue)
+    check = dependency_check(result)
+    assert check['passed'] is True

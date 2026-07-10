@@ -297,6 +297,55 @@ def _explicit_no_dependencies(text: str, allow_bare_none: bool = True) -> bool:
     ]
     return any(re.search(pattern, cleaned, flags=re.IGNORECASE) for pattern in patterns)
 
+
+def _managed_dependency_statement(text: str) -> bool:
+    """Return True when Business Impact documents a dependency as managed/tracked.
+
+    ASOC PI readiness accepts the Known Dependencies control when a narrative
+    Business Impact field clearly states that a dependency exists and that it
+    is managed, tracked, mitigated, covered by tickets, or ready for review.
+    Example that must pass:
+    "Dependency on infrastructure but managed 24Jun: tickets to be ready for review Monday".
+
+    This deliberately does not pass a bare statement such as
+    "Dependency on infrastructure" because that only declares a dependency; it
+    does not show that it is being managed.
+    """
+    cleaned = normalized(text)
+    if not cleaned:
+        return False
+
+    has_dependency = bool(re.search(
+        r'\b(dependenc(?:y|ies)|dependency|dependencies|deps?|dependent|dependant|dependants)\b',
+        cleaned,
+        flags=re.IGNORECASE,
+    ))
+    if not has_dependency:
+        return False
+
+    managed_patterns = [
+        r'\bmanaged\b',
+        r'\bmitigated\b',
+        r'\btracked\b',
+        r'\bcovered\b',
+        r'\bhandled\b',
+        r'\bresolved\b',
+        r'\bclosed\b',
+        r'\bowned\b',
+        r'\bassigned\b',
+        r'\bin\s+place\b',
+        r'\bin\s+progress\b',
+        r'\bunder\s+control\b',
+        r'\bready\s+for\s+review\b',
+        r'\btickets?\b',
+        r'\bjira\b',
+        r'\bcreated\b',
+        r'\bcaptured\b',
+        r'\breview\s+monday\b',
+    ]
+    return any(re.search(pattern, cleaned, flags=re.IGNORECASE) for pattern in managed_patterns)
+
+
 class ComplianceEngine:
     def __init__(
         self,
@@ -414,7 +463,10 @@ class ComplianceEngine:
                 if fid in seen or not fid.startswith('customfield_'):
                     continue
                 text = flatten_text(raw)
-                if _explicit_no_dependencies(text, allow_bare_none=False):
+                if (
+                    _explicit_no_dependencies(text, allow_bare_none=False)
+                    or _managed_dependency_statement(text)
+                ):
                     add_value(fid, raw, fid)
 
         return results
@@ -434,18 +486,23 @@ class ComplianceEngine:
                     return candidate['text']
         return candidates[0]['text'] if candidates else ''
 
-    def _explicit_no_dependency_field_evidence(self, issue: dict) -> tuple[str, str]:
-        """Find an explicit no-dependency declaration in Business Impact.
+    def _business_impact_dependency_evidence(self, issue: dict) -> tuple[str, str, str]:
+        """Find an acceptable dependency declaration in Business Impact.
 
-        Returns (evidence_text, source_name). The source name is used in the
-        detail view and exports so the manager can see why the dependency check
-        passed.
+        Returns (evidence_text, source_name, mode). Mode is either
+        ``no_dependencies`` or ``managed_dependency`` and is used to render
+        clear audit evidence.
         """
-        for candidate in self._field_text_candidates(issue, 'business_impact'):
+        candidates = self._field_text_candidates(issue, 'business_impact')
+        for candidate in candidates:
             text = candidate['text']
             if _explicit_no_dependencies(text, allow_bare_none=False):
-                return text, candidate.get('source') or 'Business Impact field'
-        return '', ''
+                return text, candidate.get('source') or 'Business Impact field', 'no_dependencies'
+        for candidate in candidates:
+            text = candidate['text']
+            if _managed_dependency_statement(text):
+                return text, candidate.get('source') or 'Business Impact field', 'managed_dependency'
+        return '', '', ''
 
     def _story_points_raw(self, issue: dict) -> tuple[Any, str]:
         fields = issue.get('fields', {}) or {}
@@ -540,8 +597,8 @@ class ComplianceEngine:
                 linked_keys.append(key)
                 linked_projects.add(key.split('-', 1)[0].upper())
 
-        business_impact, business_impact_source = self._explicit_no_dependency_field_evidence(issue)
-        business_impact_declares_no_dependencies = bool(business_impact)
+        business_impact, business_impact_source, business_impact_mode = self._business_impact_dependency_evidence(issue)
+        business_impact_dependency_is_acceptable = bool(business_impact)
 
         declaration_norm = normalized(declaration)
         explicitly_none = _explicit_no_dependencies(declaration, allow_bare_none=True)
@@ -549,16 +606,20 @@ class ComplianceEngine:
         has_links = bool(linked_keys)
 
         # Manager rule: when the Business Impact field explicitly says there
-        # are no dependencies, the Known Dependencies control is satisfied.
-        # This is an intentional override because ASOC initiatives sometimes
-        # document dependency absence in Business Impact rather than a dedicated
+        # are no dependencies, or it documents a dependency as managed/tracked,
+        # the Known Dependencies control is satisfied. This is intentional
+        # because ASOC initiatives sometimes document dependency absence or
+        # dependency management in Business Impact rather than a dedicated
         # dependency field. Bare values such as "None" are still not accepted
         # here; the text must mention dependencies.
-        if business_impact_declares_no_dependencies:
+        if business_impact_dependency_is_acceptable:
             passed = True
             raw_source = business_impact_source or ''
             source_label = 'Business Impact field' if not raw_source or raw_source.startswith('customfield_') else f'Business Impact field ({raw_source})'
-            evidence = f'{source_label}: dependencies explicitly declared as: {business_impact}'
+            if business_impact_mode == 'managed_dependency':
+                evidence = f'{source_label}: dependency is documented as managed/tracked: {business_impact}'
+            else:
+                evidence = f'{source_label}: dependencies explicitly declared as: {business_impact}'
         elif explicitly_none:
             passed = True
             evidence = f'{declaration_source}: dependencies explicitly declared as: {declaration}'
