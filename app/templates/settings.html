@@ -27,6 +27,7 @@
       {{ select_field('acceptance_criteria', 'Acceptance Criteria', cfg.mapping.get('acceptance_criteria', '')) }}
       {{ select_field('dependencies', 'Dependencies', cfg.mapping.get('dependencies', '')) }}
       {{ select_field('business_impact', 'Business Impact dependency fallback', cfg.mapping.get('business_impact', '')) }}
+      {{ select_field('target_end', 'Initiative Target end (used for PI Yield)', cfg.mapping.get('target_end', '')) }}
       {{ select_field('story_points', 'Story Points / sizing', cfg.mapping.get('story_points', '')) }}
       {{ select_field('squad', 'Squad field (optional)', cfg.mapping.get('squad', '')) }}
       <label>Initiative issue type<input name="initiative_issue_type" value="{{ cfg.initiative_issue_type }}" required></label>

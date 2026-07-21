@@ -18,7 +18,16 @@
     </div>
     {% if authenticated %}
     <nav>
-      <a href="/">Dashboard</a>
+      <a href="/executive">Executive Dashboard</a>
+      <a href="/">PI Compliance</a>
+      <a href="/art">ART Configuration</a>
+      <a href="/pi-status">PI Status</a>
+      <a href="/pi-performance">PI Performance</a>
+      <a href="/analytics">PI Analytics</a>
+      <a href="/initiative-explorer">Initiative Explorer</a>
+      <a href="/baseline">PI Baseline</a>
+      <a href="/reports">Reports</a>
+      <a href="/diagnostics">Jira Diagnostics</a>
       <a href="/settings">Settings</a>
       <form method="post" action="/logout" class="inline-form">
         <input type="hidden" name="csrf" value="{{ csrf_token }}">

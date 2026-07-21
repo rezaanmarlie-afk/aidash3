@@ -112,5 +112,5 @@ def test_exports_contain_both_scores_and_criterion_evidence():
     assert 75.0 in summary[1]
     assert 'Criterion' in detail[0]
     assert any('Definition of Ready' in row for row in detail[1:])
-    assert any('No usable evidence' in str(value) or 'Dependencies are neither' in str(value)
+    assert any('Dependencies are neither explicitly declared' in str(value)
                for row in detail[1:] for value in row)

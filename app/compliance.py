@@ -153,7 +153,14 @@ def _unique_headings(groups: list[list[str]]) -> list[str]:
 ALL_DESCRIPTION_HEADINGS = _unique_headings(list(REQUIREMENT_HEADING_ALIASES.values()))
 DESCRIPTION_BOUNDARY_HEADINGS = _unique_headings([
     ALL_DESCRIPTION_HEADINGS,
-    ['Summary', 'Context', 'Other Information', 'Background', 'Description', 'Objective', 'Objectives'],
+    DEFAULT_FIELD_NAMES['business_impact'] if 'DEFAULT_FIELD_NAMES' in globals() else ['Business Impact'],
+    [
+        'Summary', 'Context', 'Other Information', 'Background', 'Description',
+        'Objective', 'Objectives', 'Business Impact', 'Business impact',
+        'Business Impact / Value', 'Impact', 'Expected Business Value',
+        'Business Value', 'Expected value', 'Key Stakeholder/s', 'Key Stakeholders',
+        'Stakeholders', 'Failed Reason', 'Risk', 'Risks', 'Scope', 'Out of Scope',
+    ],
 ])
 
 
@@ -227,6 +234,96 @@ def description_section(
     return ''
 
 
+def _cut_at_inline_boundary(text: str, boundary_headings: list[str]) -> str:
+    """Trim evidence at the next known heading even when ADF flattened it."""
+    evidence = (text or '').strip()
+    if not evidence:
+        return ''
+    cut_at: int | None = None
+    for heading in boundary_headings:
+        h = str(heading or '').strip()
+        if not h or normalized(h) == 'business impact' or normalized(h) in {'dependencies', 'known dependencies', 'known dependency', 'dependency'}:
+            continue
+        pattern = re.compile(rf'(?i)(?:^|\s)({re.escape(h)})(?:\s*(?::|[-–—=])|\s+|$)')
+        match = pattern.search(evidence)
+        if match:
+            start = match.start(1)
+            if start > 0 and (cut_at is None or start < cut_at):
+                cut_at = start
+    if cut_at is not None:
+        evidence = evidence[:cut_at].strip()
+    return evidence
+
+
+def labelled_description_section(
+    description: str,
+    headings: list[str],
+    boundary_headings: list[str] | None = None,
+) -> str:
+    """Extract a labelled description section with tolerant ADF handling.
+
+    Supports:
+    - Business Impact\nNo dependencies
+    - Business Impact: No dependencies
+    - Business Impact - No dependencies
+    - Business Impact No dependencies
+    - Business ImpactNo dependencies
+    """
+    if not description:
+        return ''
+
+    text = str(description).replace('\r\n', '\n').replace('\r', '\n')
+    boundaries = boundary_headings or DESCRIPTION_BOUNDARY_HEADINGS
+
+    strict = description_section(text, headings, boundary_headings=boundaries)
+    if normalized(strict):
+        return strict
+
+    alias_patterns = [re.escape(h.strip()) for h in sorted(headings, key=len, reverse=True) if h.strip()]
+    if not alias_patterns:
+        return ''
+    aliases = '|'.join(alias_patterns)
+
+    line_pattern = re.compile(
+        rf'''(?ix)^\s*
+        (?:[-*+•>]\s*)?
+        (?:\#{{1,6}}\s*)?
+        (?:h[1-6]\.\s*)?
+        (?:\d+[.)]\s*)?
+        (?P<label>{aliases})
+        \s*(?:(?P<separator>:|[-–—=])\s*)?
+        (?P<inline>.*)$'''
+    )
+
+    lines = text.split('\n')
+    for index, line in enumerate(lines):
+        match = line_pattern.match(line or '')
+        if not match:
+            continue
+        inline = (match.group('inline') or '').strip()
+        pieces: list[str] = [inline] if inline else []
+        for following in lines[index + 1:]:
+            is_boundary, _ = _heading_line(following, boundaries)
+            if is_boundary:
+                break
+            pieces.append(following)
+        evidence = '\n'.join(pieces).strip()
+        evidence = _cut_at_inline_boundary(evidence, boundaries)
+        if normalized(evidence):
+            return evidence
+
+    anywhere_pattern = re.compile(
+        rf'(?is)(?:^|\n|\s)(?P<label>{aliases})\s*(?::|[-–—=])?\s*(?P<after>.+)$'
+    )
+    match = anywhere_pattern.search(text)
+    if match:
+        evidence = _cut_at_inline_boundary((match.group('after') or '').strip(), boundaries)
+        if normalized(evidence):
+            return evidence
+
+    return ''
+
+
 @dataclass
 class CheckResult:
     key: str
@@ -245,6 +342,7 @@ DEFAULT_FIELD_NAMES = {
     'dependencies': ['Dependencies', 'Known Dependencies', 'Known dependencies'],
     'story_points': ['Story Points', 'Story point estimate', 'Story Points Estimate'],
     'business_impact': ['Business Impact', 'Business impact', 'Business Impact / Value', 'Impact'],
+    'target_end': ['Target end', 'Target End', 'Target end date', 'Target End Date'],
     'squad': ['Squad', 'Delivery Squad', 'ASOC Squad'],
 }
 
@@ -265,8 +363,9 @@ def _explicit_no_dependencies(text: str, allow_bare_none: bool = True) -> bool:
 
     Manager rule: any Business Impact value that contains a clear phrase such as
     "No dependencies" must pass the Known Dependencies check, even when the
-    same field continues with additional business-impact text. Examples that
-    must pass include "No dependencies and use cases in place",
+    same field continues with additional business-impact text. This rule is
+    absolute and has priority over later managed/tracked dependency logic.
+    Examples that must pass include "No dependencies and use cases in place",
     "No dependencies - create", and "There are no known dependencies, but ...".
     """
     cleaned = normalized(text)
@@ -344,6 +443,26 @@ def _managed_dependency_statement(text: str) -> bool:
         r'\breview\s+monday\b',
     ]
     return any(re.search(pattern, cleaned, flags=re.IGNORECASE) for pattern in managed_patterns)
+
+
+def _mentions_dependency_word(text: str) -> bool:
+    """Return True when text contains dependency/dependencies wording.
+
+    Manager rule v1.26: for Known Dependencies, any Jira evidence value that
+    contains the word "dependency" or "dependencies" is accepted as a
+    documented dependency statement. This includes values such as
+    "No dependencies", "Dependency on infrastructure", and longer mixed
+    Business Impact narratives. Common misspellings used in Jira comments are
+    accepted as well.
+    """
+    cleaned = normalized(text)
+    if not cleaned:
+        return False
+    return bool(re.search(
+        r'\b(dependency|dependencies|dependenc(?:y|ies)|dependancy|dependancies)\b',
+        cleaned,
+        flags=re.IGNORECASE,
+    ))
 
 
 class ComplianceEngine:
@@ -450,24 +569,12 @@ class ComplianceEngine:
                 name = str(item.get('name') or field_id).strip()
                 add_value(field_id, item.get('value'), name)
 
-            # v1.20 safety net: some Jira projects expose the Business Impact
-            # field under a workspace-specific custom field that is not named in
-            # the global field catalogue and may not be included in saved
-            # settings. If any returned custom field explicitly contains
-            # "No dependencies" with additional words, include it as a
-            # dependency declaration candidate. This is deliberately restricted
-            # to explicit no-dependency wording; a plain "None" still does
-            # not pass for Business Impact.
-            for field_id, raw in fields.items():
-                fid = str(field_id)
-                if fid in seen or not fid.startswith('customfield_'):
-                    continue
-                text = flatten_text(raw)
-                if (
-                    _explicit_no_dependencies(text, allow_bare_none=False)
-                    or _managed_dependency_statement(text)
-                ):
-                    add_value(fid, raw, fid)
+            # v1.28: do not treat arbitrary custom fields as Business Impact.
+            # The manager rule is intentionally scoped to the Business Impact
+            # field used by the top-level NMGOS initiative/project/workspace.
+            # Candidate values must therefore come from the configured Business
+            # Impact mapping, project field candidates, or metadata fields whose
+            # Jira name itself resolves to Business Impact.
 
         return results
 
@@ -486,14 +593,77 @@ class ComplianceEngine:
                     return candidate['text']
         return candidates[0]['text'] if candidates else ''
 
+    def _issue_wide_dependency_evidence(self, issue: dict) -> tuple[str, str]:
+        """Return dependency wording from any populated Jira field on the issue.
+
+        v1.26 note: the production scan no longer uses this broad issue-wide
+        fallback because it caused slow per-ticket all-field Jira reads. Business
+        Impact remains the preferred dependency fallback; dedicated Dependencies
+        fields and labelled Description sections are still checked normally.
+        """
+        fields = issue.get('fields', {}) or {}
+        skip_fields = {
+            'issuelinks', 'attachment', 'comment', 'worklog', 'watches',
+            'votes', 'subtasks', 'thumbnail', 'progress', 'aggregateprogress',
+        }
+        for field_id, raw in fields.items():
+            fid = str(field_id or '').strip()
+            if not fid or fid in skip_fields:
+                continue
+            text = flatten_text(raw)
+            if _mentions_dependency_word(text):
+                return text, fid
+        return '', ''
+
+    def _business_impact_description_section(self, issue: dict) -> str:
+        """Return Business Impact evidence from the Jira Description/ADF body.
+
+        In some NMGOS tickets, Business Impact is not a separate custom field;
+        it is a clearly labelled section inside the Jira description. The
+        top-level Known Dependencies fallback must therefore read both the
+        Business Impact custom field and the Business Impact section in the
+        Description / Atlassian Document Format body.
+        """
+        if not self.allow_description_fallback:
+            return ''
+        description = rich_text_to_text((issue.get('fields') or {}).get('description'))
+        if not description:
+            return ''
+        boundary_headings = _unique_headings([
+            DESCRIPTION_BOUNDARY_HEADINGS,
+            DEFAULT_FIELD_NAMES['business_impact'],
+            [
+                'Expected Business Value', 'Business Value', 'Expected value',
+                'Key Stakeholder/s', 'Key Stakeholders', 'Stakeholders',
+                'Failed Reason', 'Risk', 'Risks', 'Scope', 'Out of Scope',
+            ],
+        ])
+        return labelled_description_section(
+            description,
+            DEFAULT_FIELD_NAMES['business_impact'],
+            boundary_headings=boundary_headings,
+        )
+
     def _business_impact_dependency_evidence(self, issue: dict) -> tuple[str, str, str]:
         """Find an acceptable dependency declaration in Business Impact.
 
-        Returns (evidence_text, source_name, mode). Mode is either
-        ``no_dependencies`` or ``managed_dependency`` and is used to render
-        clear audit evidence.
+        Returns (evidence_text, source_name, mode). Mode is used to render
+        clear audit evidence. v1.30 follows the manager rule that the top-level
+        NMGOS Business Impact value containing the word dependency/dependencies
+        satisfies the Known Dependencies control whether Business Impact is a
+        Jira custom field or a labelled section inside the Jira Description /
+        ADF body. The more specific no-dependencies and managed/tracked modes
+        are kept for clearer evidence text.
         """
         candidates = self._field_text_candidates(issue, 'business_impact')
+        description_business_impact = self._business_impact_description_section(issue)
+        if description_business_impact:
+            candidates.append({
+                'field_id': 'description.business_impact',
+                'source': 'Business Impact section in Description',
+                'text': description_business_impact,
+            })
+
         for candidate in candidates:
             text = candidate['text']
             if _explicit_no_dependencies(text, allow_bare_none=False):
@@ -502,6 +672,10 @@ class ComplianceEngine:
             text = candidate['text']
             if _managed_dependency_statement(text):
                 return text, candidate.get('source') or 'Business Impact field', 'managed_dependency'
+        for candidate in candidates:
+            text = candidate['text']
+            if _mentions_dependency_word(text):
+                return text, candidate.get('source') or 'Business Impact field', 'dependency_mentioned'
         return '', '', ''
 
     def _story_points_raw(self, issue: dict) -> tuple[Any, str]:
@@ -577,7 +751,7 @@ class ComplianceEngine:
             remediation=f'Complete the {label} field or a clearly labelled {label} section in the description.',
         )
 
-    def _dependencies(self, issue: dict, issue_type: str) -> CheckResult:
+    def _dependencies(self, issue: dict, issue_type: str, hierarchy_level: str = "") -> CheckResult:
         declaration = self._field_evidence(issue, 'dependencies')
         declaration_source = 'Dedicated Jira field'
         if not declaration and self.allow_description_fallback:
@@ -597,32 +771,49 @@ class ComplianceEngine:
                 linked_keys.append(key)
                 linked_projects.add(key.split('-', 1)[0].upper())
 
-        business_impact, business_impact_source, business_impact_mode = self._business_impact_dependency_evidence(issue)
+        # Business Impact fallback is intentionally applied only at the top-level
+        # Initiative / selected NMGOS ticket. Epics, Stories, Tasks and Features
+        # in other boards/workspaces must not pass Known Dependencies because of
+        # their own unrelated Business Impact fields.
+        business_impact = business_impact_source = business_impact_mode = ''
+        if hierarchy_level == 'top_level':
+            business_impact, business_impact_source, business_impact_mode = self._business_impact_dependency_evidence(issue)
         business_impact_dependency_is_acceptable = bool(business_impact)
-
         declaration_norm = normalized(declaration)
         explicitly_none = _explicit_no_dependencies(declaration, allow_bare_none=True)
         has_declaration = bool(declaration_norm)
         has_links = bool(linked_keys)
 
-        # Manager rule: when the Business Impact field explicitly says there
-        # are no dependencies, or it documents a dependency as managed/tracked,
-        # the Known Dependencies control is satisfied. This is intentional
-        # because ASOC initiatives sometimes document dependency absence or
-        # dependency management in Business Impact rather than a dedicated
-        # dependency field. Bare values such as "None" are still not accepted
-        # here; the text must mention dependencies.
+        # Manager rule v1.30: only the top-level NMGOS Business Impact field or Description section can
+        # satisfy Known Dependencies via dependency/dependencies wording. This
+        # includes explicit absence ("No dependencies") and documented
+        # dependency wording. Child Epics/Stories/Tasks use the normal
+        # Dependencies field, Description section and Jira links.
         if business_impact_dependency_is_acceptable:
             passed = True
             raw_source = business_impact_source or ''
-            source_label = 'Business Impact field' if not raw_source or raw_source.startswith('customfield_') else f'Business Impact field ({raw_source})'
+            
+            if not raw_source or raw_source.startswith('customfield_'):
+                source_label = 'Top-level Business Impact field'
+            elif 'description' in raw_source.lower():
+                source_label = 'Top-level Business Impact section in Description'
+            else:
+                source_label = f'Top-level Business Impact field ({raw_source})'
             if business_impact_mode == 'managed_dependency':
                 evidence = f'{source_label}: dependency is documented as managed/tracked: {business_impact}'
+            elif business_impact_mode == 'dependency_mentioned':
+                evidence = f'{source_label}: dependency wording is documented: {business_impact}'
             else:
                 evidence = f'{source_label}: dependencies explicitly declared as: {business_impact}'
         elif explicitly_none:
             passed = True
             evidence = f'{declaration_source}: dependencies explicitly declared as: {declaration}'
+        elif has_declaration and _mentions_dependency_word(declaration):
+            passed = True
+            if has_links:
+                evidence = f'{declaration_source}: dependency wording is documented: {declaration[:160]}; linked tickets: {", ".join(linked_keys)}'
+            else:
+                evidence = f'{declaration_source}: dependency wording is documented: {declaration[:200]}'
         elif has_declaration and has_links:
             if issue_type == 'story' and self.internal_projects:
                 internal_links = sorted(linked_projects & self.internal_projects)
@@ -776,7 +967,7 @@ class ComplianceEngine:
                 issue, 'acceptance_criteria', 'Acceptance Criteria',
                 REQUIREMENT_HEADING_ALIASES['acceptance_criteria'],
             )),
-            self._apply_exclusion(self._dependencies(issue, issue_type)),
+            self._apply_exclusion(self._dependencies(issue, issue_type, hierarchy_level)),
             self._apply_exclusion(self._estimate(issue, issue_type)),
             *[self._custom_criterion(issue, criterion, hierarchy_level) for criterion in self.additional_criteria],
         ]

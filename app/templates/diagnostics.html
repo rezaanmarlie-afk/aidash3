@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Jira Diagnostics · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="page-header">
+  <div>
+    <h1>Jira Yield Diagnostics</h1>
+    <p>Inspect the exact Target end field, raw Jira value, parsed date, and descendant closure dates for one Initiative.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <form method="get" action="/diagnostics" class="filter-grid">
+    <label>Initiative Jira key
+      <input name="issue_key" value="{{ issue_key }}" placeholder="NMGOS-3919" required>
+    </label>
+    <div class="filter-actions"><button class="primary" type="submit">Run diagnostic scan</button></div>
+  </form>
+  <p class="muted">This tool runs only when requested. It does not affect or slow normal PI scans.</p>
+</section>
+
+{% if error %}<div class="alert error"><strong>Diagnostic failed:</strong> {{ error }}</div>{% endif %}
+
+{% if report %}
+<section class="kpi-grid">
+  <article class="kpi"><span>Configured field</span><strong>{{ report.configured_target_end.field_name }}</strong><small>{{ report.configured_target_end.field_id }}</small></article>
+  <article class="kpi"><span>Detected target end</span><strong>{{ report.detected_target_end.date or 'Not detected' }}</strong><small>{{ report.detected_target_end.source or 'No source matched' }}</small></article>
+  <article class="kpi"><span>Descendants found</span><strong>{{ report.descendants|length }}</strong><small>Up to four hierarchy levels</small></article>
+  <article class="kpi"><span>Jira API calls</span><strong>{{ report.jira_api_requests }}</strong><small>Diagnostic scan only</small></article>
+</section>
+
+<section class="panel">
+  <div class="section-heading"><div><h2>{{ report.issue_key }} — {{ report.issue_summary }}</h2><p>{{ report.issue_type }} · {{ report.issue_status }}</p></div>
+  <a class="button primary" href="/diagnostics/download.json?issue_key={{ report.issue_key|urlencode }}">Download diagnostic JSON</a></div>
+</section>
+
+<section class="panel">
+  <h2>Target-date candidates received from Jira</h2>
+  <div class="table-wrap"><table><thead><tr><th>Field</th><th>Field ID</th><th>Value seen by app</th><th>Parsed date</th></tr></thead><tbody>
+  {% for row in report.target_candidate_fields %}<tr><td>{{ row.field_name }}</td><td><code>{{ row.field_id }}</code></td><td><pre class="diagnostic-value">{{ row.display_value }}</pre></td><td>{{ row.parsed_date or '—' }}</td></tr>{% else %}<tr><td colspan="4">No target-date candidate fields were returned by Jira.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="panel">
+  <h2>Description / ADF text seen by the app</h2>
+  <pre class="diagnostic-block">{{ report.description_text or 'No description text returned.' }}</pre>
+</section>
+
+<section class="panel">
+  <h2>Descendant closure evidence</h2>
+  <div class="table-wrap"><table><thead><tr><th>Key</th><th>Parent</th><th>Type</th><th>Status</th><th>Closed date</th><th>Source</th></tr></thead><tbody>
+  {% for row in report.descendants %}<tr><td>{{ row.key or 'Query error' }}</td><td>{{ row.parent }}</td><td>{{ row.issue_type or '—' }}</td><td>{{ row.status or '—' }}</td><td>{{ row.closed_date or '—' }}</td><td>{{ row.closed_date_source or row.error or '—' }}</td></tr>{% else %}<tr><td colspan="6">No descendants were found through Jira parent hierarchy queries.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}{% block title %}Executive Dashboard{% endblock %}{% block content %}
+<section class="page-heading executive-heading"><div><p class="eyebrow">EXECUTIVE PI GOVERNANCE</p><h1>Executive Dashboard</h1><p>A focused view of readiness, delivery, sign-off, scope and PI Yield.</p></div></section>
+<form class="filter-bar executive-filter" method="get">
+  <label>ART<select name="art_id">{% for a in arts %}<option value="{{a.id}}" {% if art and a.id==art.id %}selected{% endif %}>{{a.name}} — {{a.pi_value}}</option>{% endfor %}</select></label>
+  <label>Yield tolerance<select name="allowed_days">{% for d in range(0,15) %}<option value="{{d}}" {% if d==allowed_days %}selected{% endif %}>Target end + {{d}} day{% if d != 1 %}s{% endif %}</option>{% endfor %}</select></label>
+  <input type="hidden" name="run" value="1"><button class="primary">Refresh executive view</button>
+</form>
+{% if error %}<div class="alert error">{{error}}</div>{% endif %}
+{% if metrics %}
+<section class="executive-hero">
+  <div><span class="hero-kicker">{{art.pi_value}} PI YIELD</span><strong>{{metrics.yield_percent}}%</strong><p>{{metrics.performance.completed_count}} of {{metrics.performance.committed_count}} committed critical initiatives delivered within tolerance.</p></div>
+  <div class="rag-orb {{metrics.yield_rag.code}}"><span>{{metrics.yield_rag.label}}</span></div>
+</section>
+<section class="executive-kpis">
+  <article><span>Committed initiatives</span><strong>{{metrics.performance.committed_count}}</strong><small>{{metrics.performance.remaining_count}} remaining</small></article>
+  <article><span>Story point completion</span><strong>{{metrics.story_point_completion}}%</strong><small>{{metrics.performance.completed_story_points}} / {{metrics.performance.total_story_points}} SP</small></article>
+  <article><span>Readiness</span><strong>{{metrics.readiness_percent}}%</strong><small>{{metrics.compliant}} of {{metrics.total}} hierarchy ready</small></article>
+  <article><span>Manager sign-off</span><strong>{{metrics.signoff_percent}}%</strong><small>{{metrics.approved}} current approvals</small></article>
+  <article><span>Scope movement</span><strong>{% if metrics.scope_delta > 0 %}+{% endif %}{{metrics.scope_delta}} SP</strong><small>{% if metrics.baseline_sp %}vs {{metrics.baseline_sp}} baseline SP{% else %}No baseline captured{% endif %}</small></article>
+  <article><span>Blocked work items</span><strong>{{metrics.blocked}}</strong><small>Across the selected ART</small></article>
+</section>
+<section class="executive-grid">
+  <div class="panel executive-panel">
+    <div class="panel-title-row"><div><p class="eyebrow">HEALTH</p><h2>Leading and lagging indicators</h2></div></div>
+    <div class="health-list">
+      <div><span>PI Yield</span><b>{{metrics.yield_percent}}%</b><i class="status-dot {{metrics.yield_rag.code}}"></i></div>
+      <div><span>Hierarchy quality</span><b>{{metrics.hierarchy_score}}%</b><i class="status-dot {{metrics.hierarchy_rag.code}}"></i></div>
+      <div><span>Ticket quality</span><b>{{metrics.ticket_score}}%</b><i class="status-dot {{'green' if metrics.ticket_score >= 90 else ('amber' if metrics.ticket_score >= 75 else 'red')}}"></i></div>
+      <div><span>Delivery progress</span><b>{{metrics.story_point_completion}}%</b><i class="status-dot {{metrics.delivery_rag.code}}"></i></div>
+      <div><span>Manager sign-off</span><b>{{metrics.signoff_percent}}%</b><i class="status-dot {{metrics.signoff_rag.code}}"></i></div>
+    </div>
+  </div>
+  <div class="panel executive-panel">
+    <div class="panel-title-row"><div><p class="eyebrow">SCOPE</p><h2>Baseline versus current</h2></div></div>
+    <div class="scope-compare"><div><span>Baseline</span><strong>{{metrics.baseline_sp}}</strong><small>Story Points</small></div><div class="scope-arrow">→</div><div><span>Current</span><strong>{{metrics.current_sp}}</strong><small>Story Points</small></div></div>
+    <div class="scope-delta {% if metrics.scope_delta > 0 %}negative{% elif metrics.scope_delta < 0 %}positive{% endif %}">{% if metrics.scope_delta > 0 %}+{% endif %}{{metrics.scope_delta}} SP ({% if metrics.scope_delta_percent > 0 %}+{% endif %}{{metrics.scope_delta_percent}}%)</div>
+  </div>
+</section>
+<section class="panel">
+  <div class="panel-title-row"><div><p class="eyebrow">ATTENTION</p><h2>Initiatives requiring executive attention</h2><p>Open, unresolved or outside the selected Yield tolerance.</p></div><div class="executive-actions"><a class="secondary" href="/pi-performance?art_id={{art.id}}&run=1&allowed_days={{allowed_days}}">Open PI Performance</a><button class="secondary" onclick="window.print()" type="button">Print / Save PDF</button></div></div>
+  {% if metrics.risk_rows %}<div class="table-wrap"><table><thead><tr><th>Initiative</th><th>Scrum Master</th><th>Target end</th><th>Resolution</th><th>Reason</th><th>Progress</th></tr></thead><tbody>{% for r in metrics.risk_rows %}<tr><td><strong>{{r.key}}</strong><br><small>{{r.summary}}</small></td><td>{{r.scrum_master}}</td><td>{{r.target_end_date or 'Missing'}}</td><td>{{r.resolution_date or 'Open'}}</td><td>{{r.reason}}</td><td>{{r.progress}}%</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">No initiatives currently require executive attention.</div>{% endif %}
+</section>
+<section class="panel"><div class="panel-title-row"><div><p class="eyebrow">TREND</p><h2>PI Yield trend</h2></div><a class="secondary" href="/pi-performance?art_id={{art.id}}">Manage snapshots</a></div>
+{% if history %}<div class="trend-chart executive-trend"><svg viewBox="0 0 760 300"><line x1="40" y1="250" x2="730" y2="250" class="axis"/><line x1="40" y1="30" x2="40" y2="250" class="axis"/>{% for p in trend_points %}{% set y=250-(p.yield*2.1) %}{% if not loop.first %}{% set prev=trend_points[loop.index0-1] %}{% set py=250-(prev.yield*2.1) %}<line x1="{{prev.x}}" y1="{{py}}" x2="{{p.x}}" y2="{{y}}" class="trend-line"/>{% endif %}<circle cx="{{p.x}}" cy="{{y}}" r="6" class="trend-dot"/><text x="{{p.x}}" y="275" text-anchor="middle">{{p.pi}}</text><text x="{{p.x}}" y="{{y-12}}" text-anchor="middle">{{p.yield}}%</text>{% endfor %}</svg></div>{% else %}<div class="empty-state">Save PI Performance snapshots to build the historical trend.</div>{% endif %}
+</section>
+{% else %}<div class="empty-state">Select an ART and refresh the executive view. Create an ART first if none are available.</div>{% endif %}
+{% endblock %}

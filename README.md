@@ -1,17 +1,63 @@
-# ASOC PI Readiness & Manager Sign-Off App v1.21
+# ASOC PI Readiness & Manager Sign-Off — Version 4.1
 
-Version 1.21 extends the Business Impact dependency rule: Known Dependencies now passes when Business Impact either says "No dependencies" with additional text, or documents an actual dependency as managed/tracked, for example "Dependency on infrastructure but managed 24Jun: tickets to be ready for review Monday". It also continues to scan duplicate or workspace-specific Business Impact fields.
+Phase 2 adds a separate PI Performance Analytics page for historical Yield, Initiative delivery, Story Points, scope movement, governance quality, Scrum Master comparison and CSV/PDF-ready reporting.
+
+## Historical data
+Use PI Performance > Save PI Trend Snapshot for each PI. Snapshots saved from v4.1 onward include readiness, compliance, hierarchy, sign-off, blocked work and scope movement. Older snapshots remain visible for Yield and delivery metrics.
+
+# ASOC PI Readiness & Manager Sign-Off v4.0
+
+Version 4.0 introduces the staged Phase 1 Executive Dashboard while retaining all v3.8 compliance, ART, baseline, diagnostics, Yield and reporting functionality.
+
+## Executive Dashboard
+- Separate uncluttered `/executive` page
+- PI Yield and configurable tolerance
+- Readiness, hierarchy, story-point completion and manager sign-off KPIs
+- RAG health indicators
+- Baseline versus current scope
+- Executive attention list
+- Historical Yield trend
+- Print / Save PDF from the browser
+
+The login redirects to the Executive Dashboard. PI Compliance remains available as a separate page.
+
+
+## Version 4.0 - Configurable Yield deadline
+
+The PI Performance page now allows the user to select the number of calendar days permitted after the Initiative Target end date. The default remains 2 days. The selected tolerance is applied to the live Yield calculation and stored in the saved performance snapshot JSON.
+
+# ASOC PI Readiness & Manager Sign-Off v3.3
+
+## Target end date correction
+
+PI Yield now recognises an Initiative target date from all of these sources:
+
+- Jira Due date
+- Custom fields named Target end / Target end date / planned or target finish/completion
+- Jira field catalogue metadata when search metadata omits the custom-field name
+- Plain Description or Jira ADF text such as `Target end: 2026-07-20`
+
+The PI Performance evidence table displays the source used for each Initiative.
+
+
+## Version 1.29 update
+
+Known Dependencies now uses Business Impact only for the top-level NMGOS / Initiative ticket. Business Impact on child Epics, Stories, Tasks, Features or unrelated Jira workspaces is ignored for this control. The rule is: if the top-level Business Impact field contains `dependency` or `dependencies`, Known Dependencies passes.
+
+# ASOC PI Readiness & Manager Sign-Off App v1.26
+
+Version 1.25 applies the simplified manager rule for Known Dependencies across the full Jira ticket: if **any Jira field** contains the word **dependency** or **dependencies**, the Known Dependencies check passes. The scan first checks the fast bulk payload; if the control would fail, it performs a targeted full-ticket `fields=*all` fallback lookup for that issue and checks every returned field. This includes **No dependencies**, **No dependencies with other words**, and statements such as **Dependency on infrastructure**.
 
 
 ## Important upgrade verification
 
-Version 1.14 adds **deep descendant story point roll-up**: the app still requests the saved/global/dynamic Story Points fields, but it now follows Jira parent hierarchy, Parent Link, Epic Link and hierarchy-like issue links up to six levels deep. This means pointed Tasks, Features, Capabilities, directly linked Stories and other descendant delivery work can be reflected against the parent Initiative/top-level ticket even when they are not in the strict Initiative→Epic→Story structure. It retains Jira project-field criteria, criterion exclusions, PDF exports and Jira Cloud Atlassian Document Format support for DoR, DOR, DoD and DOD sections.
+This build includes **deep descendant story point roll-up**: the app still requests the saved/global/dynamic Story Points fields, but it now follows Jira parent hierarchy, Parent Link, Epic Link and hierarchy-like issue links up to six levels deep. This means pointed Tasks, Features, Capabilities, directly linked Stories and other descendant delivery work can be reflected against the parent Initiative/top-level ticket even when they are not in the strict Initiative→Epic→Story structure. It retains Jira project-field criteria, criterion exclusions, PDF exports and Jira Cloud Atlassian Document Format support for DoR, DOR, DoD and DOD sections.
 
 After starting the app, confirm all three indicators:
 
-1. The browser header displays **v1.21.0**.
-2. The dashboard displays a black **Build v1.21.0** banner.
-3. `http://127.0.0.1:8000/health` reports `"version": "1.14.0"` and the expected application folder.
+1. The browser header displays **v2.1.0**.
+2. The dashboard displays a black **Build v2.1.0** banner.
+3. `http://127.0.0.1:8000/health` reports `"version": "1.26.0"` and the expected application folder.
 
 The startup script runs from its own folder, uses that folder's virtual environment, blocks startup when an old process already owns port 8000, and disables stale browser/proxy caching.
 
@@ -133,7 +179,7 @@ The app also checks that:
 
 ## Upgrade an existing installation
 
-This is a complete replacement package, not a patch or hotfix. Stop the running app, extract the ZIP, and copy the extracted application files over the existing application folder. The ZIP intentionally does not contain `.env` or `data/pi_readiness.db`, so your Jira credentials, field mappings, sign-offs and audit history are not overwritten. Start the app with `start.bat` and confirm the header shows **v1.21.0**.
+This is a complete replacement package, not a patch or hotfix. Stop the running app, extract the ZIP, and copy the extracted application files over the existing application folder. The ZIP intentionally does not contain `.env` or `data/pi_readiness.db`, so your Jira credentials, field mappings, sign-offs and audit history are not overwritten. Start the app with `start.bat` and confirm the header shows **v2.1.0**.
 
 ## Run on a Windows laptop
 
@@ -303,3 +349,76 @@ Initiative size is now derived from the final rolled-up Story Points total. The 
 
 - Known Dependencies now passes whenever the mapped Business Impact field explicitly says there are no dependencies, even if the dedicated dependency field is blank, incomplete, or has no linked Jira dependency ticket.
 - Bare Business Impact values like `None` still do not pass unless dependencies are mentioned explicitly.
+
+
+## Version 1.29 Business Impact Description/ADF correction
+
+Known Dependencies now checks Business Impact in both places used by NMGOS Jira tickets:
+
+- the configured Business Impact Jira custom field; and
+- a labelled Business Impact section inside the Jira Description / Atlassian Document Format body.
+
+This remains scoped to the top-level NMGOS Initiative/Feature ticket. Child Epics, Stories, Tasks and Features still use the normal Dependencies evidence rules.
+
+Examples that pass at top-level include `Dependency on John's support`, `No dependencies but support from CMDB team`, and `Dependency on infrastructure but managed 24Jun`.
+
+## Version 1.28 dependency performance correction
+
+Known Dependencies now restores the better v1.21-style behaviour without the slow v1.25 full-field fallback. The app checks mapped Business Impact fields, discovered Business Impact candidates, and already-loaded custom fields/metadata candidates for the words `dependency` or `dependencies`. If found, Known Dependencies passes. No per-ticket `fields=*all` fallback is performed.
+
+
+## v1.30 update
+
+Known Dependencies now extracts Business Impact from either a Jira custom field or a tolerant Business Impact section in the Jira Description/ADF body, including same-line/flattened ADF forms such as `Business Impact No dependencies...`.
+
+
+## Version 2.1 ART Governance
+
+New dedicated pages: ART Configuration, ART PI Status, Initiative Explorer, PI Baseline and Reports. Existing PI Compliance remains unchanged.
+
+
+## Version 2.1 ART user picker
+ART Configuration now searches Jira users by display name or email through the existing Jira user-picker API. Users select Scrum Masters by name; Jira account IDs are stored automatically and are no longer typed manually.
+
+
+## Version 3.0 PI Performance and Yield
+PI Yield = completed committed critical initiatives / committed critical initiatives x 100. Commitment is taken from the PI baseline. Use PI Performance to calculate the current result and save historical snapshots for multi-PI trend reporting.
+
+## Version 3.2 target end date fix
+PI Yield now discovers Jira custom target dates by semantic field name rather than requiring an exact field name and a Jira `date` schema. It supports Target End, Target End Date, Target Completion, Planned End/Finish, Initiative Target End, and similar project-specific fields. The PI Performance table shows the target date source used for each Initiative.
+
+## Version 3.4.0 — Exact NMGOS Target end mapping
+
+PI Yield now explicitly requests and reads the configured Initiative Target end field. For NMGOS the default is `Target end (customfield_10023)`. The field is selectable under Settings → Jira field mapping, is requested in every Jira scan, and its exact field name/ID is displayed as the target-date source on PI Performance.
+
+
+## Version 3.7 — Jira Yield Diagnostics
+
+A new **Jira Diagnostics** page scans one Initiative on demand and exposes the exact configured Target end field, raw value returned by Jira, parsed date, Description/ADF text, descendant statuses, and closure dates. The report can be downloaded as JSON for troubleshooting. It never includes Jira credentials or application passwords.
+
+
+## Version 3.7 PI Yield rule
+
+PI Yield now counts a committed critical Initiative as delivered when the Initiative's own Jira resolution date is on or before `Target end + 2 calendar days`. Child Stories, Tasks and Epics remain visible for delivery health but do not determine Yield.
+
+
+## Version 3.7 Yield runtime correction
+
+Version 3.7 fixes a runtime data-flow defect in the PI Performance page. The normal compliance scan compacted each Initiative and discarded the raw Jira `customfield_10023` and `resolutiondate` values before the Yield calculation ran. Jira Diagnostics could therefore see the correct dates while PI Performance still calculated 0%.
+
+The scan now preserves the configured Target end value and the Initiative resolution date in the compact result used by PI Yield. The rule remains: an Initiative passes when its Jira resolution date is on or before Target end plus two calendar days.
+
+## Version 4.3 analytics correction
+
+PI Analytics now defaults to **All ARTs / all saved PIs**. Historical results are aggregated across separate ART configuration records, because each PI normally has its own ART record. Select a specific ART only when you want to inspect snapshots saved for that exact configuration.
+
+
+## Version 4.3 – Separated PI Yield Engine
+
+PI Yield is calculated only from committed top-level Initiative/Feature fields:
+
+- Target end: configured Jira field (default `customfield_10023`)
+- Completion: the Initiative's own Jira `resolutiondate`
+- Result: pass when `resolutiondate <= Target end + Allowed deadline`
+
+Epics, Stories, Tasks and other descendants do not influence PI Yield. They remain available for compliance, story-point roll-up, Initiative Explorer and delivery-health reporting. Diagnostic closure dates now use `statuscategorychangedate` only when the issue is actually in Jira's Done category.

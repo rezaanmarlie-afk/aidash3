@@ -1,0 +1,42 @@
+{% extends "base.html" %}{% block title %}ART Configuration{% endblock %}{% block content %}
+<section class="page-heading"><div><p class="eyebrow">ART GOVERNANCE</p><h1>ART Configuration</h1><p>Build an ART by searching for and selecting one or more Jira Scrum Masters. You do not need to know Jira account IDs.</p></div></section>
+{% if saved %}<div class="alert success">ART configuration saved.</div>{% endif %}
+<div class="two-col">
+<section class="panel"><h2>Saved ARTs</h2>{% for art in arts %}<a class="list-card" href="/art?art_id={{art.id}}"><strong>{{art.name}}</strong><span>{{art.project}} · {{art.pi_value}} · {{art.scrum_masters|length}} Scrum Master(s)</span></a>{% else %}<p class="muted">No ART configured yet.</p>{% endfor %}</section>
+<section class="panel"><h2>{{'Edit ART' if selected else 'Create ART'}}</h2>
+<form method="post" action="/art" id="artForm"><input type="hidden" name="csrf" value="{{csrf_token}}"><input type="hidden" name="art_id" value="{{selected.id if selected else 0}}">
+<label>ART name<input name="name" required value="{{selected.name if selected else ''}}" placeholder="e.g. ASOC OSS ART"></label>
+<div class="form-grid"><label>Project<input name="project" value="{{selected.project if selected else 'NMGOS'}}"></label><label>PI<input name="pi_value" value="{{selected.pi_value if selected else 'PI26'}}"></label><label>Priority<input name="priority" value="{{selected.priority if selected else 'Critical'}}"></label></div>
+<div class="picker-block">
+  <label>Find Scrum Masters <small>Search Jira by name or email</small><input id="smSearch" type="search" autocomplete="off" placeholder="Type at least 2 characters, e.g. Mike Lewington"></label>
+  <div id="smStatus" class="muted picker-status">Start typing to search Jira users.</div>
+  <div id="smResults" class="picker-results" aria-live="polite"></div>
+  <h3>Selected Scrum Masters</h3>
+  <div id="smSelected" class="selected-users"></div>
+</div>
+<textarea name="scrum_master_ids" id="smIds" hidden required>{% if selected %}{{selected.scrum_masters|map(attribute='id')|join('\n')}}{% endif %}</textarea>
+<textarea name="scrum_master_names" id="smNames" hidden>{% if selected %}{{selected.scrum_masters|map(attribute='name')|join('\n')}}{% endif %}</textarea>
+<button class="primary" type="submit">Save ART</button>
+</form>{% if selected %}<form method="post" action="/art/{{selected.id}}/delete" class="top-gap"><input type="hidden" name="csrf" value="{{csrf_token}}"><button class="danger">Delete ART</button></form>{% endif %}
+</section></div>
+<script>
+(() => {
+ const search=document.getElementById('smSearch'), results=document.getElementById('smResults'), selectedBox=document.getElementById('smSelected'), status=document.getElementById('smStatus'), idsEl=document.getElementById('smIds'), namesEl=document.getElementById('smNames'), form=document.getElementById('artForm');
+ const selected=new Map();
+ const ids=(idsEl.value||'').split(/\r?\n|,/).map(x=>x.trim()).filter(Boolean);
+ const names=(namesEl.value||'').split(/\r?\n/).map(x=>x.trim());
+ ids.forEach((id,i)=>selected.set(id,{accountId:id,displayName:names[i]||id}));
+ function sync(){
+   const users=[...selected.values()]; idsEl.value=users.map(u=>u.accountId).join('\n'); namesEl.value=users.map(u=>u.displayName).join('\n');
+   selectedBox.innerHTML='';
+   if(!users.length){selectedBox.innerHTML='<p class="muted">No Scrum Masters selected yet.</p>'; return;}
+   users.forEach(u=>{const chip=document.createElement('div'); chip.className='user-chip'; chip.innerHTML=`<span><strong>${escapeHtml(u.displayName)}</strong><small>${escapeHtml(u.accountId)}</small></span><button type="button" aria-label="Remove ${escapeHtml(u.displayName)}">×</button>`; chip.querySelector('button').onclick=()=>{selected.delete(u.accountId);sync();}; selectedBox.appendChild(chip);});
+ }
+ function escapeHtml(v){return String(v??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+ let timer, controller;
+ search.addEventListener('input',()=>{clearTimeout(timer); const q=search.value.trim(); results.innerHTML=''; if(q.length<2){status.textContent='Type at least 2 characters.';return;} status.textContent='Searching Jira…'; timer=setTimeout(async()=>{try{if(controller)controller.abort();controller=new AbortController(); const res=await fetch('/api/jira/users?q='+encodeURIComponent(q),{signal:controller.signal}); if(!res.ok)throw new Error(await res.text()); const users=await res.json(); results.innerHTML=''; if(!users.length){status.textContent='No Jira users found. Try another name or email.';return;} status.textContent=`${users.length} Jira user(s) found. Select one or more.`; users.forEach(u=>{const b=document.createElement('button');b.type='button';b.className='user-result';b.disabled=selected.has(u.accountId);b.innerHTML=`<strong>${escapeHtml(u.displayName||u.accountId)}</strong><small>${escapeHtml(u.accountId)}</small>`;b.onclick=()=>{selected.set(u.accountId,{accountId:u.accountId,displayName:u.displayName||u.accountId});sync();b.disabled=true;};results.appendChild(b);});}catch(e){if(e.name!=='AbortError'){status.textContent='Could not search Jira users: '+e.message;}}},350);});
+ form.addEventListener('submit',e=>{sync(); if(!selected.size){e.preventDefault(); status.textContent='Select at least one Scrum Master before saving the ART.'; search.focus();}});
+ sync();
+})();
+</script>
+{% endblock %}

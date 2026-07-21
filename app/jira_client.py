@@ -512,24 +512,42 @@ class JiraClient:
         return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
     @classmethod
+    def _field_text_mentions_dependency_word(cls, value: Any) -> bool:
+        """Fast raw-value dependency-word detector for metadata enrichment.
+
+        This is intentionally limited to the issue metadata already fetched by
+        the scan. It does not perform a per-ticket fields=*all fallback, so it
+        preserves v1.26 performance while restoring the manager rule that
+        Business Impact wording containing dependency/dependencies is enough
+        evidence for the Known Dependencies control.
+        """
+        text = re.sub(r'\s+', ' ', cls._field_value_text(value) or '').strip().casefold()
+        if not text:
+            return False
+        return bool(re.search(
+            r'\b(dependency|dependencies|dependenc(?:y|ies)|dependancy|dependancies)\b',
+            text,
+            flags=re.IGNORECASE,
+        ))
+
+    @classmethod
     def _likely_business_impact_field(cls, field_id: str, name: str, schema: dict | None, raw_value: Any) -> bool:
+        """Return True only for fields whose Jira name is Business Impact-like.
+
+        v1.28 narrows dependency fallback to the Business Impact field at the
+        top-level NMGOS ticket. Do not classify a field as Business Impact merely
+        because its value contains dependency/dependencies; that caused the app
+        to evaluate unrelated fields from other boards/workspaces.
+        """
         label = str(name or field_id or '')
         norm = cls._norm_field_label(label)
         text = label.casefold()
         strong_exact = {
             'businessimpact', 'businessimpacts', 'businessimpactvalue',
-            'businessvalue', 'businessbenefit', 'impact', 'benefit',
-            'benefits', 'businesscaseimpact', 'businessoutcome',
+            'businessimpactandvalue', 'businessimpactvaluebenefit',
+            'businessimpactasoc', 'asocbusinessimpact',
         }
-        if norm in strong_exact:
-            return True
-        if 'business' in text and any(token in text for token in ('impact', 'value', 'benefit', 'outcome', 'case')):
-            return True
-        # Safety net: if a returned issue field value itself explicitly says
-        # there are no dependencies, keep it as a Business Impact candidate so
-        # the compliance engine can use the manager's declaration even when the
-        # duplicate field name is not discoverable from the global catalogue.
-        return cls._field_text_declares_no_dependencies(raw_value)
+        return bool(norm in strong_exact or 'business impact' in text)
 
     @classmethod
     def _likely_story_point_field(cls, field_id: str, name: str, schema: dict | None, raw_value: Any) -> bool:
@@ -642,6 +660,14 @@ class JiraClient:
             }
 
         known = {str(fid).strip() for fid in (known_field_ids or []) if str(fid).strip()}
+        # Jira's search endpoint does not consistently return `names` metadata,
+        # especially for team-managed projects. Build a global ID-to-name map
+        # once and use it as a fallback so custom fields such as `Target end`
+        # can still be identified from their customfield ID.
+        try:
+            field_catalog = self.field_catalog()
+        except Exception:
+            field_catalog = {}
         dynamic_names: dict[str, str] = {}
         dynamic_business_names: dict[str, str] = {}
         issues_enriched = 0
@@ -668,12 +694,18 @@ class JiraClient:
                     continue
                 expanded_fields = expanded_issue.get('fields') or {}
                 target_fields = target.setdefault('fields', {})
+                # Yield requires authoritative Jira completion and target dates.
+                for system_date_field in ('duedate', 'resolutiondate', 'statuscategorychangedate'):
+                    if system_date_field in expanded_fields:
+                        target_fields[system_date_field] = expanded_fields.get(system_date_field)
                 candidates: list[dict[str, Any]] = []
                 business_candidates: list[dict[str, Any]] = []
+                target_date_candidates: list[dict[str, Any]] = []
                 for field_id, raw in expanded_fields.items():
                     fid = str(field_id)
-                    name = names.get(fid, fid)
-                    schema = schemas.get(fid) or {}
+                    catalog_item = field_catalog.get(fid) or {}
+                    name = names.get(fid) or str(catalog_item.get('name') or fid)
+                    schema = schemas.get(fid) or catalog_item.get('schema') or {}
                     if fid in known or self._likely_story_point_field(fid, name, schema, raw):
                         target_fields.setdefault(fid, raw)
                         candidates.append({'field_id': fid, 'name': name, 'value': raw})
@@ -682,6 +714,24 @@ class JiraClient:
                     if self._likely_business_impact_field(fid, name, schema, raw):
                         target_fields.setdefault(fid, raw)
                         business_candidates.append({'field_id': fid, 'name': name, 'value': raw})
+                    norm_name = self._norm_field_label(name)
+                    # Jira sites frequently expose Target End as a custom field
+                    # whose schema is reported as string, any, or a vendor-specific
+                    # type. Field-name semantics are therefore authoritative here.
+                    exact_target_names = {
+                        'targetend', 'targetenddate', 'targetcompletion', 'targetcompletiondate',
+                        'plannedend', 'plannedenddate', 'plannedcompletion', 'plannedcompletiondate',
+                        'initiativeend', 'initiativeenddate', 'enddate', 'duedate',
+                        'targetfinish', 'targetfinishdate', 'plannedfinish', 'plannedfinishdate',
+                    }
+                    semantic_target_name = (
+                        norm_name in exact_target_names
+                        or ('target' in norm_name and any(token in norm_name for token in ('end', 'finish', 'completion', 'due')))
+                        or ('planned' in norm_name and any(token in norm_name for token in ('end', 'finish', 'completion')))
+                    )
+                    if raw not in (None, '', [], {}) and semantic_target_name:
+                        target_fields[fid] = raw
+                        target_date_candidates.append({'field_id': fid, 'name': name, 'value': raw})
                 if candidates:
                     # Preserve candidates already created by a previous batch, but
                     # replace duplicate field IDs with the latest metadata value.
@@ -694,6 +744,11 @@ class JiraClient:
                         merged[str(item['field_id'])] = item
                     target['_story_point_candidates'] = list(merged.values())
                     issues_enriched += 1
+                if target_date_candidates:
+                    merged_dates = {str(item.get('field_id')): dict(item) for item in target.get('_target_end_date_candidates', []) or [] if isinstance(item, dict) and item.get('field_id')}
+                    for item in target_date_candidates:
+                        merged_dates[str(item['field_id'])] = item
+                    target['_target_end_date_candidates'] = list(merged_dates.values())
                 if business_candidates:
                     merged_business: dict[str, dict[str, Any]] = {
                         str(item.get('field_id')): dict(item)
